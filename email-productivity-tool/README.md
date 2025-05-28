@@ -106,6 +106,11 @@ cd email-productivity-tool
         
         # DeepSeek API Key
         DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE" # Your API key for DeepSeek LLM
+
+        # Token Encryption Key (IMPORTANT - KEEP SECRET)
+        # Used for AES encryption of stored OAuth tokens (accessToken, refreshToken).
+        # Generate a strong, random 32-byte string (e.g., using a password manager or `openssl rand -hex 32`).
+        TOKEN_ENCRYPTION_KEY="YOUR_STRONG_32_BYTE_SECRET_KEY_HERE" 
         ```
     *   **Note on Project IDs**: The `FIREBASE_PROJECT_ID` in `.env.local` is used by the Firebase Admin SDK and should correspond to the project where your Firestore database is. The `ACTUAL_GCP_PROJECT_ID` placeholder in `nextjs-app/pages/api/gmail/watch.js` and in the Cloud Function deployment refers to the project ID for Pub/Sub and Cloud Functions. These may or may not be the same project depending on your setup. The `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME` placeholders in `nextjs-app/pages/api/gmail/watch.js` and the `gcloud` deployment command for the Cloud Function need to be replaced directly in the code or ideally managed via environment variables in future development.
 
@@ -146,6 +151,7 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
 
     -   `DEEPSEEK_API_KEY`: Your API key for the DeepSeek LLM service.
     -   `FIRESTORE_PROJECT_ID`: (Optional, but recommended for clarity) The GCP Project ID where your Firestore database is located. This is often the same as your main `ACTUAL_GCP_PROJECT_ID`. The Cloud Function's runtime usually has access to this if it's in the same project, but explicit configuration can be useful.
+    -   `TOKEN_ENCRYPTION_KEY`: The same 32-byte secret key used by the Next.js application for encrypting and decrypting OAuth tokens stored in Firestore. This key must be identical in both environments.
 
     These can be set during deployment using the `--set-env-vars` flag in the `gcloud` command, or via the GCP Console.
 
@@ -169,7 +175,7 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
       --trigger-topic ACTUAL_PUBSUB_TOPIC_NAME \
       --entry-point handleGmailNotification \
       --source ./gcp-functions/handleGmailNotification \
-      --set-env-vars DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE",FIRESTORE_PROJECT_ID="ACTUAL_GCP_PROJECT_ID" \
+      --set-env-vars DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE",FIRESTORE_PROJECT_ID="ACTUAL_GCP_PROJECT_ID",TOKEN_ENCRYPTION_KEY="YOUR_STRONG_32_BYTE_SECRET_KEY_HERE" \
       --allow-unauthenticated
     ```
     *   The `--source ./gcp-functions/handleGmailNotification` assumes you are running the command from the project root. If running from within the `handleGmailNotification` directory, use `--source .`.
@@ -423,6 +429,13 @@ The initial version of the Admin Dashboard includes:
     -   Shows Message ID, associated User ID, subject, sender, processing status, a snippet of the summary, and the processed date.
     -   Includes options to filter the list by User ID and by processing status.
     -   Powered by the `GET /api/admin/emails/listAll` API endpoint.
+
+## Security Considerations
+
+-   **Environment Variables:** All secrets (API keys, OAuth client secrets, encryption keys) must be stored securely as environment variables and should never be committed to the repository. Follow best practices for managing secrets in your deployment environments.
+-   **OAuth Token Encryption:** Google OAuth access tokens and refresh tokens stored in Firestore are encrypted at rest using AES encryption (`crypto-js` library). This relies on the `TOKEN_ENCRYPTION_KEY` environment variable, which must be a strong, unique secret key and kept confidential. This key needs to be consistently set for both the Next.js backend and the `handleGmailNotification` Cloud Function.
+-   **Admin Privileges:** Access to the Admin Dashboard is restricted. Ensure that the `isAdmin` flag in Firestore is only granted to trusted users.
+-   **OAuth Scopes:** The application requests specific Google OAuth scopes. Users should understand what permissions they are granting.
 
 This README provides a starting point for setting up and running the MVP.
 ```

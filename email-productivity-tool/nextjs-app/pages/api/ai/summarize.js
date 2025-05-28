@@ -69,6 +69,7 @@ export default async function handler(req, res) {
     const { text: summary } = await generateText({
       model: deepseek.chat('deepseek-chat'),
       prompt: prompt,
+      temperature: 0.3 // Added temperature
     });
 
     if (!summary) {

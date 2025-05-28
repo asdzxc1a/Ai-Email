@@ -92,6 +92,7 @@ Generate only the body of the reply, without any greetings like "Hi [User's Name
     const { text: draftReply } = await generateText({
       model: deepseek.chat('deepseek-chat'),
       prompt: prompt,
+      temperature: 0.6 // Added temperature
     });
 
     if (!draftReply) {

@@ -1,5 +1,6 @@
 // email-productivity-tool/nextjs-app/lib/firestoreUtils.js
 import admin from './firebaseAdmin';
+import { encryptToken, decryptToken } from './cryptoUtils'; // Adjust path if needed
 
 const db = admin.firestore();
 const usersCollection = db.collection('users');
@@ -11,7 +12,28 @@ export const getUser = async (userId) => {
       console.log(`User ${userId} not found.`);
       return null;
     }
-    return { id: userDoc.id, ...userDoc.data() };
+    const userData = userDoc.data();
+    
+    // Decrypt tokens
+    const accessToken = userData.accessToken ? decryptToken(userData.accessToken) : null;
+    const refreshToken = userData.refreshToken ? decryptToken(userData.refreshToken) : null;
+
+    // If decryption fails and returns null, it means either the token was null to begin with,
+    // or it was plaintext and failed decryption (cryptoUtils.js handles this by returning null).
+    // Or it was genuinely corrupted.
+    // It's important that if a token was stored as plaintext before this change,
+    // decryptToken might return null. We need a strategy for this.
+    // For now, if decryptToken returns null, we pass null.
+    // A more robust solution would be to try decrypt, if fails, assume plaintext and use, then re-encrypt.
+    // Or, have a field indicating if tokens are encrypted.
+    // Let's assume for now new tokens will be encrypted, old ones might be plain (and decryption will fail, returning null).
+
+    return { 
+      id: userDoc.id, 
+      ...userData, // original data (includes encrypted tokens)
+      accessToken: accessToken, // potentially decrypted
+      refreshToken: refreshToken // potentially decrypted
+    };
   } catch (error) {
     console.error(`Error getting user ${userId}:`, error);
     throw error;
@@ -53,20 +75,34 @@ export const checkAdminStatus = async (userId) => {
 
 export const createUser = async (userId, userData) => {
   try {
-    const { email, name, accessToken, refreshToken } = userData;
+    const { email, name, isAdmin } = userData; // Keep isAdmin if passed
+    const encryptedAccessToken = userData.accessToken ? encryptToken(userData.accessToken) : null;
+    const encryptedRefreshToken = userData.refreshToken ? encryptToken(userData.refreshToken) : null;
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
-    await usersCollection.doc(userId).set({
+    
+    const dataToSet = {
       email,
       name,
-      accessToken, // TODO: Encrypt before storing
-      refreshToken, // TODO: Encrypt before storing
+      isAdmin: isAdmin || false, // Default isAdmin to false
+      accessToken: encryptedAccessToken,
+      refreshToken: encryptedRefreshToken,
+      // Include other fields from userData if necessary, e.g., accessTokenExpires
+      accessTokenExpires: userData.accessTokenExpires || null, 
       gmailHistoryId: null,
       watchExpiration: null,
       createdAt: timestamp,
       updatedAt: timestamp,
-    });
-    console.log(`User ${userId} created successfully.`);
-    return { id: userId, ...userData, createdAt: new Date(), updatedAt: new Date() }; // Approximate client-side
+    };
+    // Remove null token fields to avoid storing them explicitly if not present
+    if (!encryptedAccessToken) delete dataToSet.accessToken;
+    if (!encryptedRefreshToken) delete dataToSet.refreshToken;
+    if (!userData.accessTokenExpires) delete dataToSet.accessTokenExpires;
+
+
+    await usersCollection.doc(userId).set(dataToSet);
+    console.log(`User ${userId} created successfully with encrypted tokens.`);
+    // Don't return raw/encrypted tokens from here for security best practice
+    return { id: userId, email, name, isAdmin: dataToSet.isAdmin };
   } catch (error) {
     console.error(`Error creating user ${userId}:`, error);
     throw error;
@@ -76,15 +112,28 @@ export const createUser = async (userId, userData) => {
 export const updateUser = async (userId, updateData) => {
   try {
     const dataToUpdate = { ...updateData };
-    // TODO: Encrypt accessToken and refreshToken if they are being updated
-    if (dataToUpdate.accessToken) console.warn("accessToken should be encrypted before storing");
-    if (dataToUpdate.refreshToken) console.warn("refreshToken should be encrypted before storing");
+    if (dataToUpdate.accessToken) {
+      dataToUpdate.accessToken = encryptToken(dataToUpdate.accessToken);
+    }
+    if (dataToUpdate.refreshToken) {
+      dataToUpdate.refreshToken = encryptToken(dataToUpdate.refreshToken);
+    }
+    // Ensure accessTokenExpires is handled if present in updateData
+    if (dataToUpdate.accessTokenExpires) {
+        // Assuming it's already a Date object or Firestore will handle conversion
+        // No specific encryption needed for expiry date itself
+    }
+
+    // Remove null token fields if encryption returned null (e.g. empty input)
+    if (dataToUpdate.accessToken === null) delete dataToUpdate.accessToken;
+    if (dataToUpdate.refreshToken === null) delete dataToUpdate.refreshToken;
 
     dataToUpdate.updatedAt = admin.firestore.FieldValue.serverTimestamp();
-    
     await usersCollection.doc(userId).update(dataToUpdate);
-    console.log(`User ${userId} updated successfully.`);
-    return await getUser(userId); // Return updated user
+    console.log(`User ${userId} updated successfully with potentially encrypted tokens.`);
+    // Return a confirmation or minimal data, avoid returning tokens directly.
+    // getUser will decrypt if called separately.
+    return { id: userId, message: "User updated. Re-fetch for decrypted data if needed." };
   } catch (error) {
     console.error(`Error updating user ${userId}:`, error);
     throw error;

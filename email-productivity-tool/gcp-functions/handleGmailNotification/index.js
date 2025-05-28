@@ -1,11 +1,12 @@
 // gcp-functions/handleGmailNotification/index.js
-const { Firestore, FieldValue } = require('@google-cloud/firestore'); // Import FieldValue
+const { Firestore, FieldValue } = require('@google-cloud/firestore');
 const { fetchEmailContent } = require('./cfGmailUtils');
 const { Deepseek } = require('@ai-sdk/deepseek');
 const { generateText } = require('ai');
+const { decryptToken } = require('./cfCryptoUtils'); // Import decryptToken
 
 const firestore = new Firestore();
-const deepseek = new Deepseek(); 
+const deepseek = new Deepseek();
 
 exports.handleGmailNotification = async (pubSubEvent, context) => {
   const message = pubSubEvent.data
@@ -41,12 +42,21 @@ exports.handleGmailNotification = async (pubSubEvent, context) => {
     }
     const userDoc = userSnapshot.docs[0].data();
     const userId = userSnapshot.docs[0].id; // This is the Google User ID (sub)
-    const userAccessToken = userDoc.accessToken;
-    if (!userAccessToken) { 
-        console.error(`Access token not found for user ${userId} (email: ${emailAddress})`);
+    
+    const encryptedAccessToken = userDoc.accessToken;
+    if (!encryptedAccessToken) { 
+        console.error(`Encrypted access token not found for user ${userId} (email: ${emailAddress})`);
         return;
     }
-    console.log(`Found user ${userId} with access token.`);
+    const userAccessToken = decryptToken(encryptedAccessToken);
+    if (!userAccessToken) {
+        console.error(`Failed to decrypt access token for user ${userId} (email: ${emailAddress}). Check TOKEN_ENCRYPTION_KEY.`);
+        // Potentially, the token was not encrypted (e.g., older user record)
+        // If TOKEN_ENCRYPTION_KEY is set, and this still fails, it might be a corrupted token or truly unencrypted.
+        // For now, we treat decryption failure as critical.
+        return;
+    }
+    console.log(`Found user ${userId} and successfully decrypted access token.`);
 
     // Using the logic from turn 47 which is more robust for historyId
     const startHistoryId = userDoc.gmailHistoryId && BigInt(userDoc.gmailHistoryId) > BigInt(notificationHistoryId) 
@@ -122,6 +132,7 @@ ${truncatedBody}`;
         const { text: llmSummary } = await generateText({
           model: deepseek.chat('deepseek-chat'),
           prompt: prompt,
+          temperature: 0.3 // Added temperature
         });
         if (llmSummary) {
           summaryText = llmSummary;
