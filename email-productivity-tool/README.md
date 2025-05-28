@@ -19,6 +19,7 @@ This repository contains the code for Phase 1 (MVP).
 - **Gmail Integration (Add-on):** Google Apps Script
 - **Authentication:** NextAuth.js (with Google Provider)
 - **Database:** Google Cloud Firestore
+- **LLM:** DeepSeek (via Vercel AI SDK - using packages `@ai-sdk/deepseek` and `ai`)
 - **Real-time Notifications:** Google Cloud Pub/Sub (for Gmail push notifications)
 - **Serverless Functions:** Google Cloud Functions (for Pub/Sub message handling)
 - **Deployment (examples):** Vercel/Netlify for Next.js, GCP for backend services.
@@ -102,6 +103,9 @@ cd email-productivity-tool
         FIREBASE_PROJECT_ID="ACTUAL_GCP_PROJECT_ID_FOR_FIRESTORE" # Should match the project where Firestore is
         FIREBASE_CLIENT_EMAIL="your-service-account-email@your-project-id.iam.gserviceaccount.com"
         FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_COPIED_PRIVATE_KEY_CONTENT_HERE\n-----END PRIVATE KEY-----\n" # Ensure newlines are correctly escaped or use actual newlines if your system supports it
+        
+        # DeepSeek API Key
+        DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE" # Your API key for DeepSeek LLM
         ```
     *   **Note on Project IDs**: The `FIREBASE_PROJECT_ID` in `.env.local` is used by the Firebase Admin SDK and should correspond to the project where your Firestore database is. The `ACTUAL_GCP_PROJECT_ID` placeholder in `nextjs-app/pages/api/gmail/watch.js` and in the Cloud Function deployment refers to the project ID for Pub/Sub and Cloud Functions. These may or may not be the same project depending on your setup. The `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME` placeholders in `nextjs-app/pages/api/gmail/watch.js` and the `gcloud` deployment command for the Cloud Function need to be replaced directly in the code or ideally managed via environment variables in future development.
 
@@ -194,6 +198,61 @@ After setting up all components:
 4.  **Check Cloud Function Logs:**
     *   Navigate to your Cloud Function logs in the GCP console.
     *   Look for logs from `handleGmailNotification` indicating it received a Pub/Sub message (e.g., "Received Gmail notification:", followed by email and history ID). This confirms the pipeline from Gmail to Pub/Sub to your function is working.
+
+## Next.js Backend API Endpoints
+
+The `nextjs-app` provides several backend API endpoints under `/api/`:
+
+#### `GET /api/gmail/getEmailContent`
+Fetches the detailed content of a specific email message.
+-   **Authentication:** User session required.
+-   **Query Parameters:**
+    -   `messageId` (string): The ID of the Gmail message to fetch.
+-   **Response:**
+    ```json
+    {
+      "id": "messageId",
+      "subject": "Email Subject",
+      "from": "Sender <sender@example.com>",
+      "date": "Email Date",
+      "snippet": "Email snippet...",
+      "body": "Plaintext or HTML body of the email..."
+    }
+    ```
+
+#### `POST /api/ai/summarize`
+Summarizes the content of a given email message ID using the configured LLM (DeepSeek).
+-   **Authentication:** User session required.
+-   **Request Body:**
+    ```json
+    {
+      "messageId": "<GMAIL_MESSAGE_ID>"
+    }
+    ```
+-   **Response:**
+    ```json
+    {
+      "summary": "Generated summary of the email."
+    }
+    ```
+(Other API endpoints like `/api/auth/*`, `/api/gmail/watch`, `/api/ai/generate-reply` also exist but are detailed elsewhere or are placeholders.)
+
+
+### Testing Email Summarization
+
+1.  **Ensure API Key is Set:** Verify that your `DEEPSEEK_API_KEY` is correctly set in `nextjs-app/.env.local`.
+2.  **Run the Application:** Start the Next.js development server (`npm run dev` from the `nextjs-app` directory).
+3.  **Log In:** Open the application in your browser (e.g., `http://localhost:3000`) and sign in with your Google account.
+4.  **Obtain a Gmail Message ID:**
+    *   Open Gmail in your web browser for the account you logged in with.
+    *   Find an email you want to summarize.
+    *   Click the three vertical dots ("More options") on the email and select "Show original".
+    *   In the "Original Message" view, look for the `Message-ID:` header (e.g., `Message-ID: <CAMsA7+-c50G_R_SUB_EXAMPLE_ID@mail.gmail.com>`).
+    *   Copy the ID *without* the angle brackets (e.g., `CAMsA7+-c50G_R_SUB_EXAMPLE_ID@mail.gmail.com`).
+5.  **Test Summarization:**
+    *   On the application's homepage, paste the copied Message ID into the "Enter Gmail Message ID" input field.
+    *   Click the "Get Summary" button.
+    *   The generated summary from DeepSeek should appear in the "API Response" section. If there are errors, they will be displayed there.
 
 This README provides a starting point for setting up and running the MVP.
 ```

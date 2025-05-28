@@ -1,13 +1,16 @@
+// email-productivity-tool/nextjs-app/pages/index.js
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useState } from 'react';
 
 export default function HomePage() {
   const { data: session } = useSession();
   const [watchStatus, setWatchStatus] = useState('');
-  const [textToProcess, setTextToProcess] = useState('Enter some email text here to test AI functions...');
+  // Removed textToProcess, added messageIdInput
+  const [messageIdInput, setMessageIdInput] = useState(''); 
   const [apiResponse, setApiResponse] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // setupGmailWatch function remains unchanged
   const setupGmailWatch = async () => {
     setWatchStatus('Setting up...');
     try {
@@ -25,8 +28,8 @@ export default function HomePage() {
   };
 
   const handleSummarize = async () => {
-    if (!textToProcess.trim()) {
-      alert('Please enter some text to summarize.');
+    if (!messageIdInput.trim()) {
+      alert('Please enter a Message ID to summarize.');
       return;
     }
     setIsLoading(true);
@@ -35,7 +38,8 @@ export default function HomePage() {
       const res = await fetch('/api/ai/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ textToSummarize: textToProcess }),
+        // Send messageId instead of textToSummarize
+        body: JSON.stringify({ messageId: messageIdInput }), 
       });
       const data = await res.json();
       if (res.ok) {
@@ -50,18 +54,22 @@ export default function HomePage() {
     setIsLoading(false);
   };
 
-  const handleGenerateReply = async () => {
-    if (!textToProcess.trim()) {
-      alert('Please enter some text to generate a reply for.');
+  // Updated to use messageIdInput for consistency, though generate-reply API is still a placeholder
+  const handleGenerateReply = async () => { 
+    if (!messageIdInput.trim()) {
+      alert('Please enter a Message ID to generate a reply for.');
       return;
     }
     setIsLoading(true);
     setApiResponse(null);
     try {
+      // The generate-reply API is still a placeholder and might expect different input.
+      // For now, sending messageId as part of the body for consistency.
+      // This will likely need further adjustment when generate-reply is implemented.
       const res = await fetch('/api/ai/generate-reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emailContent: textToProcess, context: 'general' }),
+        body: JSON.stringify({ emailContent: `Content for message ID: ${messageIdInput}`, context: 'general' }), 
       });
       const data = await res.json();
       if (res.ok) {
@@ -85,24 +93,29 @@ export default function HomePage() {
         {watchStatus && <p>{watchStatus}</p>}
         <hr style={{ margin: '20px 0' }} />
         <h2>Test AI Functions</h2>
-        <textarea
-          value={textToProcess}
-          onChange={(e) => setTextToProcess(e.target.value)}
-          rows="5"
-          cols="70" // Increased width
-          style={{ display: 'block', margin: '10px 0', padding: '5px', border: '1px solid #ccc' }}
+        <label htmlFor="messageIdInput" style={{ display: 'block', margin: '10px 0 5px' }}>
+          Enter Gmail Message ID:
+        </label>
+        <input
+          type="text"
+          id="messageIdInput"
+          value={messageIdInput}
+          onChange={(e) => setMessageIdInput(e.target.value)}
+          placeholder="Enter Gmail Message ID here"
+          style={{ display: 'block', margin: '0 0 10px', width: '300px', padding: '8px', border: '1px solid #ccc' }}
         />
         <button onClick={handleSummarize} disabled={isLoading}>
           {isLoading ? 'Processing...' : 'Get Summary'}
         </button>
+        {/* Button for generate reply, also uses messageIdInput for now */}
         <button onClick={handleGenerateReply} disabled={isLoading} style={{ marginLeft: '10px' }}>
-          {isLoading ? 'Processing...' : 'Generate Reply'}
+          {isLoading ? 'Processing...' : 'Generate Reply (Placeholder)'}
         </button>
         {isLoading && <p style={{ marginTop: '10px' }}>Loading...</p>}
         {apiResponse && (
-          <div style={{ marginTop: '20px', padding: '10px', border: '1px solid #ccc', backgroundColor: '#f9f9f9' }}>
+          <div style={{ marginTop: '20px', padding: '10px', border: '1px solid #ccc', backgroundColor: '#f9f9f9', whiteSpace: 'pre-wrap' }}>
             <h3>API Response:</h3>
-            <pre>{JSON.stringify(apiResponse, null, 2)}</pre>
+            <p>{typeof apiResponse.summary === 'string' ? apiResponse.summary : JSON.stringify(apiResponse, null, 2)}</p>
           </div>
         )}
         <br />
@@ -111,6 +124,7 @@ export default function HomePage() {
     );
   }
   return (
+    // Sign-in UI remains unchanged
     <>
       <h1>Email Productivity Tool</h1>
       <p>Not signed in</p>
