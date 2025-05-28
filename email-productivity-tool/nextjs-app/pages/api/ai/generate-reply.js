@@ -1,17 +1,41 @@
 // email-productivity-tool/nextjs-app/pages/api/ai/generate-reply.js
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth].js';
-import { fetchEmailContent } from '../../../lib/gmailUtils.js'; // Adjusted path
+import { fetchEmailContent } from '../../../lib/gmailUtils.js';
 import { Deepseek } from '@ai-sdk/deepseek';
 import { generateText } from 'ai';
+import { verifyGoogleIdTokenAndRetrieveUser } from '../../../lib/authAddonUtils'; // Import new util
 
 export default async function handler(req, res) {
-  const session = await getServerSession(req, res, authOptions);
+  let userData; // To store user info from either session or token
 
-  if (!session || !session.accessToken) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  // Try NextAuth session first
+  const session = await getServerSession(req, res, authOptions);
+  if (session && session.accessToken && session.user && session.user.id) {
+    userData = {
+      userId: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      accessToken: session.accessToken,
+    };
+  } else {
+    // If no session, try Google ID Token from Add-on
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const idToken = authHeader.split('Bearer ')[1];
+      try {
+        userData = await verifyGoogleIdTokenAndRetrieveUser(idToken);
+      } catch (error) {
+        console.error('Addon Auth Error in generate-reply:', error.message);
+        return res.status(401).json({ error: 'Unauthorized: Add-on token verification failed.', details: error.message });
+      }
+    }
   }
 
+  if (!userData || !userData.accessToken) {
+    return res.status(401).json({ error: 'Unauthorized. Valid user session or token required.' });
+  }
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
@@ -23,14 +47,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Fetch email content
-    const emailDetails = await fetchEmailContent(session.accessToken, messageId);
+    const emailDetails = await fetchEmailContent(userData.accessToken, messageId); // Use userData.accessToken
 
     if (!emailDetails) {
       return res.status(404).json({ error: 'Could not retrieve email content.' });
     }
 
-    // 2. Construct the prompt for DeepSeek
     let prompt = `You are an AI assistant helping a user draft a reply to an email.
 Here is the original email they received:
 
@@ -46,12 +68,12 @@ ${emailDetails.body}
 
     if (replyContext) {
       prompt += `The user has provided the following instructions or context for the reply:
-"${replyContext.replace(/"/g, '\\"')}" // Basic escaping for quotes in context
+"${replyContext.replace(/"/g, '\\"')}"
 ---
 `;
     }
 
-    const actualTone = tone || 'professional'; // Default to professional if no tone specified
+    const actualTone = tone || 'professional';
     prompt += `Please draft a ${actualTone} reply to this email.
 If the original email asks a question, try to answer it.
 If it's a statement, acknowledge it appropriately.
@@ -59,31 +81,22 @@ Keep the reply concise and relevant to the original email's content and user's i
 Do not invent information not present in the original email or user's context.
 Focus on being helpful and clear.
 Generate only the body of the reply, without any greetings like "Hi [User's Name]," or sign-offs like "Best regards, [User's Name]", unless specifically instructed by the user's context.`;
-
-    // Basic truncation for the overall prompt to avoid issues if email body was huge
-    // This is a safeguard; individual parts like emailDetails.body should ideally be managed too.
-    const MAX_PROMPT_LENGTH = 20000; // Adjust as needed based on model limits
+    
+    const MAX_PROMPT_LENGTH = 20000;
     if (prompt.length > MAX_PROMPT_LENGTH) {
-      // Find a way to truncate intelligently, or truncate the body part of the prompt
-      // For now, simple truncation of the whole prompt
       prompt = prompt.substring(0, MAX_PROMPT_LENGTH) + "... (prompt truncated)";
       console.warn(`Warning: Prompt for messageId ${messageId} was truncated.`);
     }
-    
-    // 3. Call DeepSeek API
-    // Ensure DEEPSEEK_API_KEY is set in your .env.local
-    const deepseek = new Deepseek(); // API key from process.env.DEEPSEEK_API_KEY
-
+        
+    const deepseek = new Deepseek();
     const { text: draftReply } = await generateText({
-      model: deepseek.chat('deepseek-chat'), // Or 'deepseek-reasoner'
+      model: deepseek.chat('deepseek-chat'),
       prompt: prompt,
-      // system: "You are an expert email reply assistant." // Alternative way for system prompt
     });
 
     if (!draftReply) {
       return res.status(500).json({ error: 'LLM returned an empty reply.' });
     }
-
     res.status(200).json({ draftReply });
 
   } catch (error) {
@@ -91,16 +104,9 @@ Generate only the body of the reply, without any greetings like "Hi [User's Name
     if (error.message && error.message.includes('authentication_error')) {
         return res.status(401).json({ error: 'LLM Authentication Error. Check API Key.' });
     }
-    // Check if it's an error from fetchEmailContent
-    if (error.status && error.details) {
-        return res.status(error.status).json({
-            error: error.message || 'Failed to fetch email content for reply generation.',
-            details: error.details
-        });
+    if (error.status && error.details) { // Error from fetchEmailContent
+        return res.status(error.status).json({ error: error.message, details: error.details });
     }
-    res.status(500).json({ 
-        error: 'Failed to generate email reply.', 
-        details: error.message || String(error) // Changed 'error' to 'String(error)'
-    });
+    res.status(500).json({ error: 'Failed to generate email reply.', details: error.message || String(error) }); // Changed error to String(error)
   }
 }

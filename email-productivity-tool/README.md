@@ -173,6 +173,21 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
     *   Follow the prompts to configure and deploy.
     *   You'll need to grant OAuth scopes during the authorization process when testing.
 
+        #### Critical Configuration: Backend URL
+
+        Before the add-on can function, you **must** edit the `apps-script-addon/Code.gs` file:
+        -   Locate the line at the top: `const NEXTJS_APP_BASE_URL = "https://your-nextjs-app-deployment-url.com";`
+        -   Replace `"https://your-nextjs-app-deployment-url.com"` with the actual deployed URL of your Next.js application.
+
+        #### Functionality
+
+        Once deployed and configured with the correct backend URL, the add-on provides the following features directly within Gmail when you open an email:
+
+        -   **Summarize Email Button:** Clicking this button will send the current email's content (via its Message ID) to the backend service, which uses an LLM (DeepSeek) to generate a summary. The summary is then displayed in the add-on sidebar.
+        -   **Draft Reply Button:** Clicking this button sends the current email's content to the backend to generate a draft reply using the LLM. The draft reply is then displayed in the add-on sidebar. (Note: For this version, reply context and tone are not set via the add-on UI).
+
+        Authentication between the add-on and the Next.js backend is handled using Google Identity Tokens (`ScriptApp.getIdentityToken()`), which are verified by the backend.
+
 ## Using the Application
 
 1.  Start the Next.js application (`npm run dev`).
@@ -198,6 +213,18 @@ After setting up all components:
 4.  **Check Cloud Function Logs:**
     *   Navigate to your Cloud Function logs in the GCP console.
     *   Look for logs from `handleGmailNotification` indicating it received a Pub/Sub message (e.g., "Received Gmail notification:", followed by email and history ID). This confirms the pipeline from Gmail to Pub/Sub to your function is working.
+
+### Testing the Deployed Add-on
+
+1.  **Deploy Next.js App:** Ensure your Next.js application is deployed to a public URL.
+2.  **Configure Add-on:** Update the `NEXTJS_APP_BASE_URL` in `apps-script-addon/Code.gs` with your Next.js app's public URL.
+3.  **Deploy Apps Script Add-on:** Deploy the add-on from the Apps Script editor (see setup instructions above). You may need to re-authorize it if you haven't before or if scopes changed (though scopes did not change in this phase).
+4.  **Install/Enable Add-on in Gmail:** Install the deployed add-on for your Google Workspace account or enable it if it's a test deployment.
+5.  **Open Gmail:** Refresh Gmail and open any email.
+6.  **Use Add-on Buttons:**
+    *   Click the "Summarize Email" button. After a moment, a summary should appear in the sidebar.
+    *   Click the "Draft Reply" button. A draft reply should appear.
+7.  **Verify Backend Calls:** Check the logs of your deployed Next.js application and the Apps Script project logs (in GCP or Apps Script editor) if you encounter issues.
 
 ## Next.js Backend API Endpoints
 

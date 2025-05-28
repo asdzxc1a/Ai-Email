@@ -1,39 +1,59 @@
 // email-productivity-tool/nextjs-app/pages/api/ai/summarize.js
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth].js';
-import { fetchEmailContent } from '../../../lib/gmailUtils.js'; // Adjusted path
-import { Deepseek } from '@ai-sdk/deepseek'; // Import Deepseek
-import { generateText } from 'ai'; // Import generateText from Vercel AI SDK
+import { fetchEmailContent } from '../../../lib/gmailUtils.js';
+import { Deepseek } from '@ai-sdk/deepseek';
+import { generateText } from 'ai';
+import { verifyGoogleIdTokenAndRetrieveUser } from '../../../lib/authAddonUtils'; // Import new util
 
 export default async function handler(req, res) {
-  const session = await getServerSession(req, res, authOptions);
+  let userData; // To store user info from either session or token
 
-  if (!session || !session.accessToken) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  // Try NextAuth session first
+  const session = await getServerSession(req, res, authOptions);
+  if (session && session.accessToken && session.user && session.user.id) {
+    userData = {
+      userId: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      accessToken: session.accessToken,
+    };
+  } else {
+    // If no session, try Google ID Token from Add-on
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const idToken = authHeader.split('Bearer ')[1];
+      try {
+        userData = await verifyGoogleIdTokenAndRetrieveUser(idToken);
+      } catch (error) {
+        console.error('Addon Auth Error in summarize:', error.message);
+        return res.status(401).json({ error: 'Unauthorized: Add-on token verification failed.', details: error.message });
+      }
+    }
+  }
+
+  if (!userData || !userData.accessToken) {
+    return res.status(401).json({ error: 'Unauthorized. Valid user session or token required.' });
   }
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { messageId } = req.body; // Changed from textToSummarize to messageId
+  const { messageId } = req.body;
 
   if (!messageId) {
     return res.status(400).json({ error: 'Missing messageId in request body.' });
   }
 
   try {
-    // 1. Fetch email content
-    const emailDetails = await fetchEmailContent(session.accessToken, messageId);
+    const emailDetails = await fetchEmailContent(userData.accessToken, messageId); // Use userData.accessToken
 
     if (!emailDetails || !emailDetails.body) {
       return res.status(404).json({ error: 'Could not retrieve email content or body was empty.' });
     }
     
-    // 2. Prepare prompt for DeepSeek
-    // Ensure emailDetails.body is not excessively long. Truncate if necessary.
-    // DeepSeek (and other LLMs) have token limits.
-    const maxBodyLength = 15000; // Example: ~4k tokens, adjust as needed
+    const maxBodyLength = 15000; 
     const truncatedBody = emailDetails.body.length > maxBodyLength 
                          ? emailDetails.body.substring(0, maxBodyLength) + "..." 
                          : emailDetails.body;
@@ -43,39 +63,27 @@ export default async function handler(req, res) {
     Subject: ${emailDetails.subject}
     Body:
     ${truncatedBody}`;
-
-    // 3. Call DeepSeek API via Vercel AI SDK
-    // Ensure DEEPSEEK_API_KEY is set in your .env.local
-    const deepseek = new Deepseek({
-      // apiKey: process.env.DEEPSEEK_API_KEY // Not typically needed if env var is set
-    }); 
+    
+    const deepseek = new Deepseek(); 
     
     const { text: summary } = await generateText({
-      model: deepseek.chat('deepseek-chat'), // Specify the model
+      model: deepseek.chat('deepseek-chat'),
       prompt: prompt,
-      // You can add other parameters like temperature, maxTokens etc. here
-      // system: "You are an expert email summarizer." // Optional system prompt
     });
 
     if (!summary) {
       return res.status(500).json({ error: 'LLM returned an empty summary.' });
     }
-
     res.status(200).json({ summary });
 
   } catch (error) {
     console.error('Error in summarization service:', error);
-    if (error.message && error.message.includes('authentication_error')) {
+    if (error.message && error.message.includes('authentication_error')) { // LLM auth error
         return res.status(401).json({ error: 'LLM Authentication Error. Check API Key.' });
     }
-    // Check for specific Vercel AI SDK errors related to API key missing
-    if (error.message && error.message.includes("Missing API key")) {
-        console.error("DeepSeek API Key is missing. Ensure DEEPSEEK_API_KEY is set in .env.local");
-        return res.status(500).json({ error: 'LLM Configuration Error: API Key missing.' });
+    if (error.status && error.details) { // Error from fetchEmailContent
+        return res.status(error.status).json({ error: error.message, details: error.details });
     }
-    res.status(500).json({ 
-        error: 'Failed to summarize email.', 
-        details: error.message || String(error) 
-    });
+    res.status(500).json({ error: 'Failed to summarize email.', details: error.message || String(error) }); // Changed error to String(error)
   }
 }
