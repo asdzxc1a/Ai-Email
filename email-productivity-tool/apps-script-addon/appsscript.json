@@ -1,0 +1,22 @@
+{
+  "timeZone": "America/New_York",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/gmail.addons.execute",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/script.container.ui",
+    "https://www.googleapis.com/auth/script.external_request"
+  ],
+  "gmail": {
+    "name": "Email Productivity Tool",
+    "logoUrl": "https://www.gstatic.com/images/icons/material/system/1x/gsuite_addons_24dp.png",
+    "contextualTriggers": [{
+      "unconditional": {},
+      "onTriggerFunction": "onGmailMessage"
+    }],
+    "primaryColor": "#4285F4",
+    "secondaryColor": "#4285F4"
+  }
+}
