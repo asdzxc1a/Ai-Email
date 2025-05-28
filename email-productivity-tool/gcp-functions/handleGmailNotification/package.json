@@ -1,0 +1,12 @@
+{
+  "name": "handle-gmail-notification",
+  "version": "0.0.1",
+  "main": "index.js",
+  "dependencies": {
+    "@google-cloud/pubsub": "^2.17.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "node index.js"
+  }
+}
