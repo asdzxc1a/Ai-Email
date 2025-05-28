@@ -175,6 +175,21 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
     *   The `--source ./gcp-functions/handleGmailNotification` assumes you are running the command from the project root. If running from within the `handleGmailNotification` directory, use `--source .`.
     *   *(Note: `allow-unauthenticated` is for the Pub/Sub trigger invocation, not general public access to an HTTP function).*
 
+#### Features (Next.js App)
+
+The Next.js web application provides the following main features for authenticated users:
+
+-   **Processed Email Listing:** Displays a list of emails that have been automatically processed by the backend system (fetched and summarized). Shows key information like subject, sender, date, and a snippet or initial summary.
+-   **Email Detail View:** Users can click on any email in the list to expand a detailed view. This view shows:
+    -   The full fetched body of the email (`plainBody`).
+    -   The complete AI-generated summary (if available).
+-   **AI Actions on Listed Emails:** Within the detail view of a selected email, users can:
+    -   **Re-summarize:** Trigger a new summarization for the selected email.
+    -   **Generate Reply:** Draft a reply for the selected email. The reply generation uses the "Reply Context" and "Reply Tone" input fields currently located in the "Test AI Functions (with Direct Message ID)" section of the page.
+-   **Direct AI Testing:** A separate section allows users to test summarization and reply generation by directly inputting a Gmail Message ID, along with context and tone for replies.
+-   **Gmail Watch Setup:** A button to initiate the Gmail `watch` process for real-time notifications (requires backend Pub/Sub and Cloud Function to be fully configured).
+
+
 ### 4. Google Apps Script Add-on (`apps-script-addon`)
 
 1.  **Using `clasp` (Command Line Apps Script Project manager):**
@@ -235,6 +250,35 @@ After setting up all components:
     *   Navigate to your Cloud Function logs in the GCP console.
     *   Look for logs from `handleGmailNotification` indicating it received a Pub/Sub message (e.g., "Received Gmail notification:", followed by email and history ID). This confirms the pipeline from Gmail to Pub/Sub to your function is working.
 
+### Testing the Next.js Web App UI
+
+1.  **Prerequisites:**
+    *   Ensure the Next.js application is running (`npm run dev`).
+    *   Ensure you have signed in with your Google account.
+    *   For email listing to show results, the real-time processing Cloud Function (`handleGmailNotification`) must have run and successfully processed some emails, storing them in the `processedEmails` Firestore collection.
+    *   Ensure your `DEEPSEEK_API_KEY` (and other necessary environment variables like Google OAuth credentials and Firebase service account details) are correctly set in `nextjs-app/.env.local`.
+
+2.  **Viewing Processed Emails:**
+    *   Navigate to the application's homepage.
+    *   The "Processed Emails" section should display a list of emails if any have been processed for your account.
+    *   If the list is loading or an error occurs, appropriate messages will be shown.
+
+3.  **Viewing Email Details:**
+    *   Click on any email item in the list (or its "View Details" button).
+    *   The item will expand to show the full email body and its summary.
+    *   Click again (or "Hide Details") to collapse.
+
+4.  **Using AI Actions on Listed Emails:**
+    *   With an email's detail view expanded:
+        *   Click "Re-summarize" to generate a new summary for that email. The result will appear in the "AI Action Response" section within that email's detail view.
+        *   To generate a reply:
+            *   Optionally, fill in the "Reply Context" textarea and select a "Reply Tone" from the dropdowns (these are currently located in the "Test AI Functions (with Direct Message ID)" section).
+            *   Click the "Generate Reply for this Email" button.
+            *   The draft reply will appear in the "AI Action Response" section within the detail view.
+
+5.  **Direct AI Testing (Using Message ID Input):**
+    *   You can still use the "Test AI Functions (with Direct Message ID)" section to test summarization or reply generation by manually entering a known Gmail Message ID. The "Reply Context" and "Reply Tone" fields in this section will be used for this direct test. The results will appear in the "API Response" section at the bottom if no specific email detail is expanded, or within the detail view if an email is selected and an action is taken there.
+
 ### Testing the Deployed Add-on
 
 1.  **Deploy Next.js App:** Ensure your Next.js application is deployed to a public URL.
@@ -259,14 +303,19 @@ Fetches the detailed content of a specific email message.
 -   **Response:**
     ```json
     {
-      "id": "messageId",
+      "docId": "messageId_as_doc_id",
+      "messageId": "actual_message_id",
       "subject": "Email Subject",
       "from": "Sender <sender@example.com>",
-      "date": "Email Date",
+      "date": "Email Date (ISO String or other consistent format)",
       "snippet": "Email snippet...",
-      "body": "Plaintext or HTML body of the email..."
+      "summary": "AI-generated summary, if available",
+      "status": "processing_status (e.g., summarized, summarization_failed)",
+      "plainBody": "Full plain text body of the email...",
+      "processedAt": "Timestamp of processing (ISO String)"
     }
     ```
+(The response is an object `{ emails: [...] }` containing an array of such email objects.)
 
 #### `POST /api/ai/summarize`
 Summarizes the content of a given email message ID using the configured LLM (DeepSeek).
