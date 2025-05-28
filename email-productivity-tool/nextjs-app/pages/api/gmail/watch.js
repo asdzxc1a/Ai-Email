@@ -13,8 +13,8 @@ export default async function handler(req, res) {
   const accessToken = session.accessToken;
 
   const GMAIL_API_ENDPOINT = 'https://www.googleapis.com/gmail/v1/users/me/watch';
-  // Use FIREBASE_PROJECT_ID for the Pub/Sub topic path
-  const pubSubTopicName = `projects/${process.env.FIREBASE_PROJECT_ID}/topics/gmail-push-notifications-placeholder`; 
+  // TODO: Replace ACTUAL_GCP_PROJECT_ID and ACTUAL_PUBSUB_TOPIC_NAME with real values or use environment variables.
+  const pubSubTopicName = 'projects/ACTUAL_GCP_PROJECT_ID/topics/ACTUAL_PUBSUB_TOPIC_NAME';
 
   try {
     const response = await fetch(GMAIL_API_ENDPOINT, {

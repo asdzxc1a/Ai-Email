@@ -52,11 +52,11 @@ Before running the application, ensure the following are set up in your GCP proj
     *   Authorized JavaScript origins (e.g., `http://localhost:3000`).
     *   Authorized redirect URIs (e.g., `http://localhost:3000/api/auth/callback/google`).
 4.  **Pub/Sub Topic:**
-    *   Create a Pub/Sub topic (e.g., `gmail-push-notifications-placeholder`). This name is referenced in the code.
+    *   Create a Pub/Sub topic (e.g., `ACTUAL_PUBSUB_TOPIC_NAME`). This name is referenced in the code.
     *   Grant the Gmail service account (`service-[PROJECT_NUMBER]@gcp-sa-gmail.iam.gserviceaccount.com`) the "Pub/Sub Publisher" role on this topic.
 5.  **Firestore Database:**
     *   Create a Firestore database in Native mode.
-    *   Set up basic security rules.
+    *   Set up basic security rules. Initial Firestore security rules have been refined to ensure users can only access and manage their own data, enhancing security.
 6.  **Service Account for Firebase Admin (Next.js backend):**
     *   Go to IAM & Admin > Service Accounts.
     *   Create a new service account or use an existing one.
@@ -99,10 +99,11 @@ cd email-productivity-tool
         NEXTAUTH_SECRET="GENERATE_A_STRONG_SECRET_HERE" # e.g., openssl rand -base64 32
 
         # Firebase Admin SDK Credentials (from downloaded service account JSON key)
-        FIREBASE_PROJECT_ID="YOUR_GCP_PROJECT_ID" # Should match the project where Firestore is
+        FIREBASE_PROJECT_ID="ACTUAL_GCP_PROJECT_ID_FOR_FIRESTORE" # Should match the project where Firestore is
         FIREBASE_CLIENT_EMAIL="your-service-account-email@your-project-id.iam.gserviceaccount.com"
         FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_COPIED_PRIVATE_KEY_CONTENT_HERE\n-----END PRIVATE KEY-----\n" # Ensure newlines are correctly escaped or use actual newlines if your system supports it
         ```
+    *   **Note on Project IDs**: The `FIREBASE_PROJECT_ID` in `.env.local` is used by the Firebase Admin SDK and should correspond to the project where your Firestore database is. The `ACTUAL_GCP_PROJECT_ID` placeholder in `nextjs-app/pages/api/gmail/watch.js` and in the Cloud Function deployment refers to the project ID for Pub/Sub and Cloud Functions. These may or may not be the same project depending on your setup. The `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME` placeholders in `nextjs-app/pages/api/gmail/watch.js` and the `gcloud` deployment command for the Cloud Function need to be replaced directly in the code or ideally managed via environment variables in future development.
 
 4.  **Run the development server:**
     ```bash
@@ -136,13 +137,13 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
     # npm install 
     ```
 3.  **Deploy using `gcloud` CLI:**
-    Replace `YOUR_GCP_PROJECT_ID` and `gmail-push-notifications-placeholder` with your actual project ID and Pub/Sub topic name.
+    Replace `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME` with your actual project ID and Pub/Sub topic name.
     ```bash
     gcloud functions deploy handleGmailNotification \
-      --project YOUR_GCP_PROJECT_ID \
+      --project ACTUAL_GCP_PROJECT_ID \
       --region YOUR_PREFERRED_REGION \
       --runtime nodejs18 \ # Or your preferred Node.js runtime
-      --trigger-topic gmail-push-notifications-placeholder \
+      --trigger-topic ACTUAL_PUBSUB_TOPIC_NAME \
       --entry-point handleGmailNotification \
       --source . \
       --allow-unauthenticated # If called directly by Pub/Sub (standard for Gmail push)
@@ -176,6 +177,23 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
 4.  (Conceptually) Set up the Gmail watch via the UI button. This tells Gmail to send notifications to your Pub/Sub topic, which then triggers your Cloud Function.
 5.  Install and authorize the Google Workspace Add-on in your Gmail account.
 6.  Open an email in Gmail to see the add-on's contextual card.
+
+## Testing the Notification Pipeline
+
+After setting up all components:
+
+1.  **Ensure Configurations are Live:**
+    *   The Next.js application (`nextjs-app`) should be running (e.g., `npm run dev`).
+    *   The Google Cloud Function (`handleGmailNotification`) must be deployed with the correct, actual values for `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME`.
+    *   Crucially, `nextjs-app/pages/api/gmail/watch.js` must have its `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME` placeholders replaced with your real values, or these should be correctly sourced from environment variables if you've adapted the code to do so.
+2.  **Trigger Watch Setup:**
+    *   Log into the Next.js web application.
+    *   Click the "Setup Gmail Watch" button. Verify any UI feedback for success.
+3.  **Send Test Email:**
+    *   Send a new email to the Gmail account you used to sign in and set up the watch.
+4.  **Check Cloud Function Logs:**
+    *   Navigate to your Cloud Function logs in the GCP console.
+    *   Look for logs from `handleGmailNotification` indicating it received a Pub/Sub message (e.g., "Received Gmail notification:", followed by email and history ID). This confirms the pipeline from Gmail to Pub/Sub to your function is working.
 
 This README provides a starting point for setting up and running the MVP.
 ```
