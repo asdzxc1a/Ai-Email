@@ -389,5 +389,40 @@ Generates a draft reply for a given email message ID using the configured LLM (D
     *   Click the "Generate Reply" button.
     *   The generated draft reply from DeepSeek should appear in the "API Response" section, formatted as "Draft Reply: ...".
 
+## Admin Dashboard
+
+The Admin Dashboard provides administrators with tools for application monitoring, user management, and viewing processed data. It is accessible via the `/admin` route for authorized admin users.
+
+### Becoming an Administrator
+
+To access the Admin Dashboard, a user must be designated as an administrator. This is done by manually setting a field in their user document within Firestore:
+
+1.  **Open Firestore:** Navigate to your Firebase project in the Google Cloud Console, then go to "Firestore Database".
+2.  **Locate the `users` Collection:** Find the `users` collection.
+3.  **Identify the User Document:** User documents are named with their unique Google User ID (`sub`). Find the document for the user you wish to make an admin (you can identify them by the `email` field within the document).
+4.  **Add/Set `isAdmin` Field:**
+    *   Select the user document.
+    *   Click "Add field" (or edit if the field exists).
+        *   **Field name:** `isAdmin`
+        *   **Field type:** `boolean`
+        *   **Field value:** `true`
+    *   Save/Update the document.
+
+The Next.js middleware protecting `/admin/*` routes will check this field upon login.
+
+### Features
+
+The initial version of the Admin Dashboard includes:
+
+-   **Dashboard Home (`/admin`):** A landing page with placeholder statistics.
+-   **Manage Users (`/admin/users`):**
+    -   Displays a paginated list of all registered users with their ID (Google SUB), name, email, admin status, and join date.
+    -   Powered by the `GET /api/admin/users/list` API endpoint.
+-   **Processed Emails (`/admin/processedEmails`):**
+    -   Displays a paginated list of all emails processed by the system's backend.
+    -   Shows Message ID, associated User ID, subject, sender, processing status, a snippet of the summary, and the processed date.
+    -   Includes options to filter the list by User ID and by processing status.
+    -   Powered by the `GET /api/admin/emails/listAll` API endpoint.
+
 This README provides a starting point for setting up and running the MVP.
 ```

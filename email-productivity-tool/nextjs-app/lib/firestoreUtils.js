@@ -18,6 +18,39 @@ export const getUser = async (userId) => {
   }
 };
 
+/**
+ * Checks if a user has admin privileges.
+ * @param {string} userId - The ID of the user (document ID in 'users' collection, typically Google SUB).
+ * @returns {Promise<boolean>} True if the user is an admin, false otherwise.
+ */
+export const checkAdminStatus = async (userId) => {
+  if (!userId) {
+    console.warn("checkAdminStatus: userId was not provided.");
+    return false;
+  }
+  try {
+    const userDocRef = usersCollection.doc(userId);
+    const userDoc = await userDocRef.get();
+
+    if (!userDoc.exists) {
+      console.log(`checkAdminStatus: User ${userId} not found.`);
+      return false;
+    }
+
+    const userData = userDoc.data();
+    if (userData && userData.isAdmin === true) {
+      console.log(`checkAdminStatus: User ${userId} is an admin.`);
+      return true;
+    } else {
+      console.log(`checkAdminStatus: User ${userId} is not an admin (isAdmin field missing or false).`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`Error checking admin status for user ${userId}:`, error);
+    return false; // Default to not admin on error
+  }
+};
+
 export const createUser = async (userId, userData) => {
   try {
     const { email, name, accessToken, refreshToken } = userData;
