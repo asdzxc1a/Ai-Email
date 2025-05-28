@@ -235,7 +235,25 @@ Summarizes the content of a given email message ID using the configured LLM (Dee
       "summary": "Generated summary of the email."
     }
     ```
-(Other API endpoints like `/api/auth/*`, `/api/gmail/watch`, `/api/ai/generate-reply` also exist but are detailed elsewhere or are placeholders.)
+
+#### `POST /api/ai/generate-reply`
+Generates a draft reply for a given email message ID using the configured LLM (DeepSeek).
+-   **Authentication:** User session required.
+-   **Request Body:**
+    ```json
+    {
+      "messageId": "<GMAIL_MESSAGE_ID>",
+      "replyContext": "<Optional: Specific instructions for the reply>",
+      "tone": "<Optional: Desired tone, e.g., 'professional', 'casual'>"
+    }
+    ```
+-   **Response:**
+    ```json
+    {
+      "draftReply": "Generated draft reply text."
+    }
+    ```
+(Other API endpoints like `/api/auth/*` and `/api/gmail/watch` also exist but are detailed elsewhere.)
 
 
 ### Testing Email Summarization
@@ -253,6 +271,19 @@ Summarizes the content of a given email message ID using the configured LLM (Dee
     *   On the application's homepage, paste the copied Message ID into the "Enter Gmail Message ID" input field.
     *   Click the "Get Summary" button.
     *   The generated summary from DeepSeek should appear in the "API Response" section. If there are errors, they will be displayed there.
+
+### Testing Email Reply Generation
+
+1.  **Ensure API Key is Set:** Verify that your `DEEPSEEK_API_KEY` is correctly set in `nextjs-app/.env.local`.
+2.  **Run the Application:** Start the Next.js development server (`npm run dev` from the `nextjs-app` directory).
+3.  **Log In:** Open the application in your browser (e.g., `http://localhost:3000`) and sign in with your Google account.
+4.  **Obtain a Gmail Message ID:** Follow the steps outlined in "Testing Email Summarization" to get a Message ID for an email you wish to reply to.
+5.  **Test Reply Generation:**
+    *   On the application's homepage, paste the copied Message ID into the "Enter Gmail Message ID" input field.
+    *   Optionally, enter specific instructions in the "Optional: Specific instructions for the reply" textarea (e.g., "Ask for clarification on their budget.").
+    *   Optionally, select a desired "Tone for the reply" from the dropdown (e.g., "Casual").
+    *   Click the "Generate Reply" button.
+    *   The generated draft reply from DeepSeek should appear in the "API Response" section, formatted as "Draft Reply: ...".
 
 This README provides a starting point for setting up and running the MVP.
 ```
