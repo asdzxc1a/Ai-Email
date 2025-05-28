@@ -220,9 +220,15 @@ The Next.js web application provides the following main features for authenticat
         Once deployed and configured with the correct backend URL, the add-on provides the following features directly within Gmail when you open an email:
 
         -   **Summarize Email Button:** Clicking this button will send the current email's content (via its Message ID) to the backend service, which uses an LLM (DeepSeek) to generate a summary. The summary is then displayed in the add-on sidebar.
-        -   **Draft Reply Button:** Clicking this button sends the current email's content to the backend to generate a draft reply using the LLM. The draft reply is then displayed in the add-on sidebar. (Note: For this version, reply context and tone are not set via the add-on UI).
+        -   **Draft Reply Button:** Users can input optional "Reply Context" (specific instructions) and select a "Tone" directly within the add-on sidebar. Clicking the button sends the current email's content along with this context and tone to the backend to generate a draft reply using the LLM. The draft reply is then displayed in the add-on.
+        -   **Insert into Reply Composer:** After a draft reply is generated and shown, an "Insert into Reply Composer" button appears. Clicking this will take the generated text and open it directly in Gmail's native reply window for the current email thread, ready for review and sending.
 
         Authentication between the add-on and the Next.js backend is handled using Google Identity Tokens (`ScriptApp.getIdentityToken()`), which are verified by the backend.
+
+        #### OAuth Scopes & Re-authorization
+
+        The add-on requires specific permissions to function. The necessary OAuth scopes are listed in the `appsscript.json` file (including `https://www.googleapis.com/auth/gmail.addons.execute`, `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/script.container.ui`, `https://www.googleapis.com/auth/script.external_request`). 
+        **Important:** With the addition of the "Insert into Reply Composer" feature, the scope `https://www.googleapis.com/auth/gmail.compose` has been added. Users who had previously authorized the add-on will need to **re-authorize it** to grant this new permission. This usually happens automatically when they try to use the add-on, or they might need to manage it via their Google account's third-party app settings if they encounter permission errors.
 
 ## Using the Application
 
@@ -283,12 +289,13 @@ After setting up all components:
 
 1.  **Deploy Next.js App:** Ensure your Next.js application is deployed to a public URL.
 2.  **Configure Add-on:** Update the `NEXTJS_APP_BASE_URL` in `apps-script-addon/Code.gs` with your Next.js app's public URL.
-3.  **Deploy Apps Script Add-on:** Deploy the add-on from the Apps Script editor (see setup instructions above). You may need to re-authorize it if you haven't before or if scopes changed (though scopes did not change in this phase).
-4.  **Install/Enable Add-on in Gmail:** Install the deployed add-on for your Google Workspace account or enable it if it's a test deployment.
+3.  **Deploy Apps Script Add-on:** Deploy the add-on from the Apps Script editor (see setup instructions above).
+4.  **Install/Enable Add-on in Gmail:** Install the deployed add-on for your Google Workspace account or enable it if it's a test deployment. If you've updated the add-on, you might be prompted to re-authorize it due to new permissions (like `gmail.compose` for inserting drafts). Please grant these permissions.
 5.  **Open Gmail:** Refresh Gmail and open any email.
 6.  **Use Add-on Buttons:**
     *   Click the "Summarize Email" button. After a moment, a summary should appear in the sidebar.
-    *   Click the "Draft Reply" button. A draft reply should appear.
+    *   To draft a reply: Optionally, fill in the 'Reply Context' textarea and select a 'Tone' from the dropdown within the add-on sidebar before clicking 'Generate Draft Reply'. A draft reply should appear.
+    *   After a draft reply is shown, click the 'Insert into Reply Composer' button. Verify that a Gmail compose window opens with the draft reply pre-filled.
 7.  **Verify Backend Calls:** Check the logs of your deployed Next.js application and the Apps Script project logs (in GCP or Apps Script editor) if you encounter issues.
 
 ## Next.js Backend API Endpoints
