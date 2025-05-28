@@ -136,23 +136,44 @@ This function is designed to be triggered by Pub/Sub messages from Gmail.
     # cd email-productivity-tool/gcp-functions/handleGmailNotification (from anywhere)
     ```
 2.  **Install dependencies (if any specific ones are needed for deployment packaging, though for simple functions, GCP handles it):**
+    The `package.json` within the `gcp-functions/handleGmailNotification` directory lists the necessary dependencies (`@google-cloud/pubsub`, `@google-cloud/firestore`, `@ai-sdk/deepseek`, `ai`). These will be installed by GCP during deployment.
     ```bash
-    # Usually not needed if package.json is simple and dependencies are in `dependencies` field.
-    # npm install 
+    # Manual npm install is usually not needed before deployment if package.json is correct.
     ```
-3.  **Deploy using `gcloud` CLI:**
+3.  **Environment Variables**
+
+    When deploying the `handleGmailNotification` Cloud Function, you need to set the following environment variables:
+
+    -   `DEEPSEEK_API_KEY`: Your API key for the DeepSeek LLM service.
+    -   `FIRESTORE_PROJECT_ID`: (Optional, but recommended for clarity) The GCP Project ID where your Firestore database is located. This is often the same as your main `ACTUAL_GCP_PROJECT_ID`. The Cloud Function's runtime usually has access to this if it's in the same project, but explicit configuration can be useful.
+
+    These can be set during deployment using the `--set-env-vars` flag in the `gcloud` command, or via the GCP Console.
+
+4.  **Required IAM Permissions**
+
+    The service account used by this Cloud Function (e.g., `ACTUAL_GCP_PROJECT_ID@appspot.gserviceaccount.com` or a custom service account) needs the following IAM roles in your GCP project:
+
+    -   **`Cloud Datastore User`**: To read from the `users` collection (to get Gmail tokens) and write to the `processedEmails` collection in Firestore.
+    -   **`Pub/Sub Subscriber`**: (Usually configured automatically by the Pub/Sub trigger) To receive messages from the Pub/Sub topic.
+    -   *(Outbound internet access is typically enabled by default and is required to call Google APIs and the DeepSeek API.)*
+    
+5.  **Deploy using `gcloud` CLI:**
     Replace `ACTUAL_GCP_PROJECT_ID` and `ACTUAL_PUBSUB_TOPIC_NAME` with your actual project ID and Pub/Sub topic name.
+    Also, replace `YOUR_DEEPSEEK_API_KEY_HERE` with your actual key.
+    If running from the project root directory (`email-productivity-tool`):
     ```bash
     gcloud functions deploy handleGmailNotification \
       --project ACTUAL_GCP_PROJECT_ID \
       --region YOUR_PREFERRED_REGION \
-      --runtime nodejs18 \ # Or your preferred Node.js runtime
+      --runtime nodejs18 \ # Or nodejs20, etc.
       --trigger-topic ACTUAL_PUBSUB_TOPIC_NAME \
       --entry-point handleGmailNotification \
-      --source . \
-      --allow-unauthenticated # If called directly by Pub/Sub (standard for Gmail push)
+      --source ./gcp-functions/handleGmailNotification \
+      --set-env-vars DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE",FIRESTORE_PROJECT_ID="ACTUAL_GCP_PROJECT_ID" \
+      --allow-unauthenticated
     ```
-    *   The `--source .` assumes you are running the command from within the `handleGmailNotification` directory.
+    *   The `--source ./gcp-functions/handleGmailNotification` assumes you are running the command from the project root. If running from within the `handleGmailNotification` directory, use `--source .`.
+    *   *(Note: `allow-unauthenticated` is for the Pub/Sub trigger invocation, not general public access to an HTTP function).*
 
 ### 4. Google Apps Script Add-on (`apps-script-addon`)
 

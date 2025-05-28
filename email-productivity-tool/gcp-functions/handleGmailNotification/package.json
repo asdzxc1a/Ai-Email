@@ -3,7 +3,10 @@
   "version": "0.0.1",
   "main": "index.js",
   "dependencies": {
-    "@google-cloud/pubsub": "^2.17.0"
+    "@google-cloud/pubsub": "^2.17.0", 
+    "@google-cloud/firestore": "^7.0.0",
+    "@ai-sdk/deepseek": "^latest", 
+    "ai": "^3.0.0" 
   },
   "devDependencies": {},
   "scripts": {
