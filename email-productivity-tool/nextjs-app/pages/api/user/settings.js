@@ -1,36 +1,19 @@
-import { getSession } from 'next-auth/react';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore'; // Import FieldValue
+import { getServerSession } from 'next-auth/next'; // Updated import
+import { authOptions } from '../auth/[...nextauth].js'; // Import authOptions
+// import { initializeApp, getApps, cert } from 'firebase-admin/app'; // Removed
+import { FieldValue } from 'firebase-admin/firestore'; // Keep FieldValue if used directly
+import admin from '../../../lib/firebaseAdmin'; // Import centralized admin
 
-// Initialize Firebase Admin SDK if not already initialized
-// Ensure your environment variables are set in your Next.js environment
-// (e.g., .env.local or Vercel environment variables)
-const serviceAccount = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  // Replace \n with actual newline characters for private key
-  privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
-};
-
-if (!getApps().length && serviceAccount.privateKey) { // Check if privateKey is defined
-  initializeApp({
-    credential: cert(serviceAccount),
-  });
-} else if (!getApps().length && !serviceAccount.privateKey) {
-  console.warn("Firebase Admin SDK private key is not available. API routes requiring Firebase Admin will not work.");
-  // Potentially initialize with default credentials if running in a GCP environment
-  // initializeApp(); 
-}
-
-const db = getApps().length ? getFirestore() : null; // Get Firestore instance only if app is initialized
+// Get Firestore instance from centralized admin
+const db = admin.firestore();
 
 export default async function handler(req, res) {
-  if (!db) { // Check if db failed to initialize
-    console.error("Firestore database is not initialized. Check Firebase Admin SDK configuration and private key.");
-    return res.status(500).json({ error: 'Internal Server Error: Database not configured.' });
-  }
+  // Assuming firebaseAdmin.js handles db initialization and logging.
+  // If admin.firestore() fails or returns an unusable instance, errors should originate there
+  // or be caught by global error handlers.
+  // The previous `if (!db)` check is removed for this reason.
 
-  const session = await getSession({ req });
+  const session = await getServerSession(req, res, authOptions); // Updated session retrieval
 
   if (!session || !session.user || !session.user.id) {
     // session.user.id is expected to be the Google User ID (sub)

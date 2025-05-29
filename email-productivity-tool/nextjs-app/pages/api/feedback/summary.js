@@ -1,36 +1,11 @@
-import { getSession } from 'next-auth/react';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getServerSession } from 'next-auth/next'; // Updated import
+import { authOptions } from '../auth/[...nextauth].js'; // Import authOptions
+// import { initializeApp, getApps, cert } from 'firebase-admin/app'; // Removed
+import { FieldValue } from 'firebase-admin/firestore'; // Keep FieldValue if used directly, getFirestore is from admin
+import admin from '../../../lib/firebaseAdmin'; // Import centralized admin
 
-// Initialize Firebase Admin SDK
-// Ensure your environment variables are set in your Next.js environment
-// (e.g., .env.local or Vercel environment variables)
-const serviceAccount = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  // Replace \n with actual newline characters for private key from environment variable
-  privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
-};
-
-// Initialize Firebase Admin SDK only if it hasn't been initialized yet and private key is available
-if (!getApps().length) {
-  if (serviceAccount.privateKey && serviceAccount.projectId && serviceAccount.clientEmail) {
-    try {
-      initializeApp({
-        credential: cert(serviceAccount),
-      });
-      console.log("Firebase Admin SDK initialized successfully.");
-    } catch (error) {
-      console.error("Error initializing Firebase Admin SDK:", error);
-      // Potentially set a flag or handle this case to prevent db operations
-    }
-  } else {
-    console.warn("Firebase Admin SDK credentials (projectId, clientEmail, or privateKey) are missing. API routes requiring Firebase Admin will not function correctly.");
-  }
-}
-
-// Get Firestore instance only if app is initialized
-const db = getApps().length > 0 ? getFirestore() : null;
+// Get Firestore instance from centralized admin
+const db = admin.firestore();
 
 
 export default async function handler(req, res) {
@@ -39,12 +14,14 @@ export default async function handler(req, res) {
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
-  if (!db) { // Check if Firestore was initialized
-    console.error("Firestore admin SDK is not initialized. This usually means Firebase Admin SDK credentials were not available or valid at startup. Check server logs.");
-    return res.status(500).json({ error: "Server configuration error: Database not available." });
-  }
+  // The check for db initialization is implicitly handled by firebaseAdmin.js
+  // If db is not available, admin.firestore() would likely throw or return an unusable instance,
+  // or firebaseAdmin.js would log errors.
+  // A direct check like `if (!db)` might still be useful if admin.firestore() could return null/undefined
+  // under certain (unlikely) conditions post-initialization.
+  // For now, assuming firebaseAdmin ensures db is valid if no init error, or errors out there.
 
-  const session = await getSession({ req });
+  const session = await getServerSession(req, res, authOptions); // Updated session retrieval
   if (!session || !session.user || !session.user.id) {
     return res.status(401).json({ error: 'Unauthorized. Please log in.' });
   }

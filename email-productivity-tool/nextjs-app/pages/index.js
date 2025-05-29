@@ -23,6 +23,10 @@ export default function HomePage() {
   const [replyThumbsVote, setReplyThumbsVote] = useState(null); // 'up', 'down', or null
   const [replyFeedbackSubmissionStatus, setReplyFeedbackSubmissionStatus] = useState('idle'); // idle, loading, success, error
 
+  // States for Sending Email
+  const [sendEmailStatus, setSendEmailStatus] = useState('idle'); // idle, loading, success, error
+  const [sendEmailError, setSendEmailError] = useState(null);
+
   const toneOptions = ["professional", "casual", "friendly", "concise", "declined_politely"];
 
   useEffect(() => {
@@ -192,6 +196,27 @@ export default function HomePage() {
             </button>
             {replyFeedbackSubmissionStatus === 'success' && <p style={{color: 'green', marginTop: '5px'}}>Feedback saved! Thank you.</p>}
             {replyFeedbackSubmissionStatus === 'error' && <p style={{color: 'red', marginTop: '5px'}}>Error saving feedback. Please try again.</p>}
+            
+            {/* "Send via Gmail" Button and Status */}
+            <div style={{ marginTop: '15px' }}>
+              <button
+                onClick={handleSendEmail}
+                disabled={!editableDraft.trim() || sendEmailStatus === 'loading'}
+                style={{ 
+                  padding: '10px 15px', 
+                  cursor: (!editableDraft.trim() || sendEmailStatus === 'loading') ? 'default' : 'pointer', 
+                  border: '1px solid #28a745', 
+                  backgroundColor: '#28a745', 
+                  color: 'white', 
+                  borderRadius: '4px',
+                  fontSize: '1em'
+                }}
+              >
+                {sendEmailStatus === 'loading' ? 'Sending...' : 'Send via Gmail'}
+              </button>
+              {sendEmailStatus === 'success' && <p style={{color: 'green', marginTop: '5px'}}>Email sent successfully!</p>}
+              {sendEmailStatus === 'error' && <p style={{color: 'red', marginTop: '5px'}}>Error sending email: {sendEmailError}</p>}
+            </div>
           </div>
         )}
 
@@ -403,6 +428,101 @@ export default function HomePage() {
     </>
    );
 }
+
+// Helper function to extract email address from "Name <email@example.com>" format
+// This might be useful if the `from` field in processedEmails is not just the email.
+function extractRawEmail(fullEmailAddress) {
+    if (!fullEmailAddress) return null;
+    const match = fullEmailAddress.match(/<([^>]+)>/);
+    return match ? match[1] : fullEmailAddress;
+}
+
+const handleSendEmail = async () => {
+  setSendEmailStatus('loading');
+  setSendEmailError(null);
+
+  if (!editableDraft.trim()) {
+    alert("Cannot send an empty reply.");
+    setSendEmailStatus('idle');
+    return;
+  }
+
+  // Determine the context of the email being replied to
+  let currentEmailContext = null;
+  let originalMessageIdForSend = null;
+
+  if (selectedEmailId) {
+    currentEmailContext = processedEmails.find(e => e.docId === selectedEmailId);
+    if (currentEmailContext) {
+      originalMessageIdForSend = currentEmailContext.docId; // docId is the messageId in processedEmails
+    }
+  } else if (messageIdInput) {
+    // If sending a reply for a direct message ID, we might not have all context like original subject/from
+    // The API expects originalSubject and recipientEmail.
+    // This scenario needs more robust handling if we want to support "Send" for direct ID drafts.
+    // For now, prioritize selectedEmailId flow.
+    // We could fetch metadata for messageIdInput here if needed, but that's an extra step.
+    alert("Sending replies generated from direct Message IDs is not fully supported in this flow if original subject/recipient are not available. Please select an email from the list.");
+    setSendEmailStatus('idle');
+    return;
+  }
+
+  if (!currentEmailContext || !originalMessageIdForSend) {
+    alert("Could not determine the email context for sending the reply.");
+    setSendEmailStatus('idle');
+    return;
+  }
+
+  const recipientEmail = extractRawEmail(currentEmailContext.from);
+  const originalSubject = currentEmailContext.subject;
+
+  if (!recipientEmail) {
+    alert("Could not extract recipient email address.");
+    setSendEmailStatus('idle');
+    return;
+  }
+  if (typeof originalSubject !== 'string') {
+    alert("Original subject is missing or invalid.");
+    setSendEmailStatus('idle');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/gmail/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originalMessageId: originalMessageIdForSend,
+        replyBody: editableDraft,
+        recipientEmail: recipientEmail,
+        originalSubject: originalSubject,
+      }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.details?.error?.message || result.error || `Failed to send email (${response.status})`);
+    }
+
+    setSendEmailStatus('success');
+    // Optionally, clear the draft or do other UI updates
+    // setEditableDraft(''); 
+    // setApiResponse(null); // Clear the draft from view
+    
+    setTimeout(() => {
+      if(sendEmailStatus === 'success') setSendEmailStatus('idle');
+    }, 4000);
+
+  } catch (error) {
+    console.error("Error sending email:", error);
+    setSendEmailError(error.message);
+    setSendEmailStatus('error');
+    setTimeout(() => {
+      if(sendEmailStatus === 'error') setSendEmailStatus('idle');
+    }, 6000);
+  }
+};
+
 
 const handleSubmitReplyFeedback = async () => {
   // Determine the correct messageId for the email being replied to.
