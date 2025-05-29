@@ -8,6 +8,24 @@ const { decryptToken } = require('./cfCryptoUtils'); // Import decryptToken
 const firestore = new Firestore();
 const deepseek = new Deepseek();
 
+// Helper function to encode a string to base64url
+function base64urlEncode(str) {
+  return Buffer.from(str)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+// Helper function to extract email address from "Name <email@example.com>" format
+function extractEmailAddress(fullEmailAddress) {
+    if (!fullEmailAddress) return null;
+    const match = fullEmailAddress.match(/<([^>]+)>/);
+    return match ? match[1] : fullEmailAddress;
+}
+
+const DEFAULT_SUMMARY_PROMPT_ID = 'defaultSummaryPrompt';
+
 exports.handleGmailNotification = async (pubSubEvent, context) => {
   const message = pubSubEvent.data
     ? Buffer.from(pubSubEvent.data, 'base64').toString()
@@ -154,19 +172,34 @@ exports.handleGmailNotification = async (pubSubEvent, context) => {
                     const truncatedBody = emailDetails.body.length > maxBodyLength 
                                        ? emailDetails.body.substring(0, maxBodyLength) + "..." 
                                        : emailDetails.body;
-                    // Log placeholder for dynamic prompt loading
-                    // TODO: Load summarization prompt dynamically from Firestore 'promptLibrary' collection (document ID: 'emailSummarization') instead of using this hardcoded version. Implement error handling for prompt fetching.
-                    console.info(`[${context.eventId || 'N/A'}] INFO: Using hardcoded summarization prompt. Dynamic prompt loading from Firestore 'promptLibrary' collection (document ID: 'emailSummarization') is pending implementation.`);
-                    const prompt = `Summarize the following email concisely:
-From: ${emailDetails.from}
-Subject: ${emailDetails.subject}
-Body:
-${truncatedBody}`;
-                    console.log(`Sending prompt to DeepSeek for message ${messageId}...`);
+
+                    // Fetch summary prompt template from Firestore
+                    let summaryPromptTemplateString;
+                    try {
+                      const promptDoc = await firestore.collection('promptLibrary').doc(DEFAULT_SUMMARY_PROMPT_ID).get();
+                      if (promptDoc.exists && promptDoc.data().template) {
+                        summaryPromptTemplateString = promptDoc.data().template;
+                        console.log(`Successfully fetched summary prompt '${DEFAULT_SUMMARY_PROMPT_ID}' from Firestore for message ${messageId}.`);
+                      } else {
+                        console.warn(`Summary prompt document '${DEFAULT_SUMMARY_PROMPT_ID}' not found or template missing in 'promptLibrary' for message ${messageId}. Falling back to hardcoded default.`);
+                        summaryPromptTemplateString = "Summarize this email concisely.\nOriginal Email From: {{originalFrom}}\nOriginal Email Subject: {{originalSubject}}\nOriginal Email Body:\n{{originalEmailBody}}";
+                      }
+                    } catch (error) {
+                      console.error(`Error fetching summary prompt '${DEFAULT_SUMMARY_PROMPT_ID}' from Firestore for message ${messageId}:`, error.message);
+                      console.warn(`Falling back to hardcoded default summary prompt for message ${messageId}.`);
+                      summaryPromptTemplateString = "Summarize this email concisely.\nOriginal Email From: {{originalFrom}}\nOriginal Email Subject: {{originalSubject}}\nOriginal Email Body:\n{{originalEmailBody}}";
+                    }
+
+                    let finalSummaryPrompt = summaryPromptTemplateString;
+                    finalSummaryPrompt = finalSummaryPrompt.replace(/{{originalEmailBody}}/g, truncatedBody || '');
+                    finalSummaryPrompt = finalSummaryPrompt.replace(/{{originalFrom}}/g, emailDetails.from || '');
+                    finalSummaryPrompt = finalSummaryPrompt.replace(/{{originalSubject}}/g, emailDetails.subject || '');
+                    
+                    console.log(`Sending prompt to DeepSeek for message ${messageId} (first 100 chars): ${finalSummaryPrompt.substring(0,100)}...`);
                     try {
                         const { text: llmSummary } = await generateText({
                             model: deepseek.chat('deepseek-chat'), 
-                            prompt: prompt,
+                            prompt: finalSummaryPrompt, // Use dynamically constructed prompt
                             temperature: 0.3
                         });
                         if (llmSummary) {
@@ -189,47 +222,176 @@ ${truncatedBody}`;
 
                 let finalProcessingStatus = processingStatus;
                 const autoSendIsEnabled = userDoc.autoSendEnabled === true;
+                let autoSentReplyBody = null; // To store the reply body if sent
+                let sentMessageDetails = {}; // To store details of the sent message
 
                 if (autoSendIsEnabled && summaryText && processingStatus === "summarized") {
-                    // TODO: Implement actual email sending via Gmail API using userAccessToken. This will require constructing a MIME message and using the gmail.users.messages.send API. Ensure 'gmail.send' scope is granted by users.
-                    console.info(`[USER: ${userId}, MSG: ${messageId}] Auto-send enabled. Placeholder: Email to ${emailDetails.from} with subject "Re: ${emailDetails.subject}" would be sent here. Full send logic pending.`);
-                    finalProcessingStatus = "summarized_auto_send_pending"; 
+                    console.log(`[USER: ${userId}, MSG: ${messageId}] Auto-send enabled. Proceeding to generate reply.`);
+                    const originalEmailBody = emailDetails.body || "";
+                    // TODO: Load reply generation prompt dynamically from Firestore 'promptLibrary' collection (document ID: 'emailReplyGeneration')
+                    const replyPrompt = `You are an AI assistant. Generate a helpful and concise reply to the following email.
+Only generate the body of the reply, do not include subject lines or any other headers.
+Original Email From: ${emailDetails.from}
+Original Email Subject: ${emailDetails.subject}
+Original Email Body:
+---
+${originalEmailBody.substring(0, 5000)}
+---
+Generate a reply to this email:`;
 
-                    // TODO: Implement audit log entry creation in 'outboundAudits' Firestore collection after successful auto-send. Include details like userId, originalMessageId, sentMessageId (from Gmail API response), recipient, subject, and timestamp.
-                    console.info(`[USER: ${userId}, MSG: ${messageId}] Placeholder: Audit log entry for auto-send to ${emailDetails.from} for original message ${messageId} would be created here. Full audit logic pending.`);
+                    let draftReplyText = null;
+                    try {
+                        console.log(`[USER: ${userId}, MSG: ${messageId}] Generating reply using LLM.`);
+                        const { text: llmReply } = await generateText({
+                            model: deepseek.chat('deepseek-chat'), // Or your preferred model
+                            prompt: replyPrompt,
+                            temperature: 0.7, // Adjust temperature as needed for replies
+                        });
+                        if (llmReply && llmReply.trim() !== "") {
+                            draftReplyText = llmReply.trim();
+                            autoSentReplyBody = draftReplyText; // Store for Firestore
+                            console.log(`[USER: ${userId}, MSG: ${messageId}] Successfully generated draft reply: "${draftReplyText.substring(0, 100)}..."`);
+                        } else {
+                            console.warn(`[USER: ${userId}, MSG: ${messageId}] LLM returned an empty reply.`);
+                            finalProcessingStatus = "auto_send_reply_generation_empty";
+                            llmErrorMessage = "LLM returned empty reply content.";
+                        }
+                    } catch (replyLlmError) {
+                        console.error(`[USER: ${userId}, MSG: ${messageId}] LLM reply generation error:`, replyLlmError.message);
+                        finalProcessingStatus = "auto_send_reply_generation_failed";
+                        llmErrorMessage = `Reply LLM Error: ${replyLlmError.message}`;
+                    }
+
+                    if (draftReplyText) {
+                        const originalMessageIdHeader = emailDetails.rawPayload.headers.find(h => h.name.toLowerCase() === 'message-id')?.value;
+                        const originalReferencesHeader = emailDetails.rawPayload.headers.find(h => h.name.toLowerCase() === 'references')?.value;
+
+                        const recipientEmail = extractEmailAddress(emailDetails.from);
+                        if (!recipientEmail) {
+                            console.error(`[USER: ${userId}, MSG: ${messageId}] Could not extract recipient email from: ${emailDetails.from}`);
+                            finalProcessingStatus = "auto_send_recipient_parse_failed";
+                            llmErrorMessage = `Failed to parse recipient email from: ${emailDetails.from}`;
+                        } else {
+                            let mimeMessage = `To: ${recipientEmail}\r\n`;
+                            mimeMessage += `From: ${emailAddress}\r\n`; // User's own email
+                            mimeMessage += `Subject: Re: ${emailDetails.subject}\r\n`;
+                            if (originalMessageIdHeader) {
+                                mimeMessage += `In-Reply-To: ${originalMessageIdHeader}\r\n`;
+                                if (originalReferencesHeader) {
+                                    mimeMessage += `References: ${originalReferencesHeader} ${originalMessageIdHeader}\r\n`;
+                                } else {
+                                    mimeMessage += `References: ${originalMessageIdHeader}\r\n`;
+                                }
+                            }
+                            mimeMessage += `Content-Type: text/plain; charset=utf-8\r\n`;
+                            mimeMessage += `\r\n`; // Blank line before body
+                            mimeMessage += `${draftReplyText}`;
+
+                            const rawEmail = base64urlEncode(mimeMessage);
+
+                            console.log(`[USER: ${userId}, MSG: ${messageId}] Attempting to send reply to ${recipientEmail}.`);
+                            try {
+                                const sendResponse = await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/send', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${userAccessToken}`,
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({ raw: rawEmail }),
+                                });
+
+                                const sendData = await sendResponse.json();
+                                if (sendResponse.ok) {
+                                    console.log(`[USER: ${userId}, MSG: ${messageId}] Successfully sent reply. Message ID: ${sendData.id}, Thread ID: ${sendData.threadId}`);
+                                    finalProcessingStatus = "auto_sent";
+                                    sentMessageDetails = {
+                                        sentMessageId: sendData.id,
+                                        sentMessageThreadId: sendData.threadId,
+                                    };
+
+                                    // Create Audit Log Entry
+                                    const auditLogData = {
+                                        userId: userId,
+                                        originalMessageId: messageId,
+                                        sentMessageId: sendData.id,
+                                        sentMessageThreadId: sendData.threadId,
+                                        recipientEmail: recipientEmail, // Already extracted
+                                        subject: `Re: ${emailDetails.subject}`,
+                                        replyBodySnippet: draftReplyText ? draftReplyText.substring(0, 250) : null,
+                                        status: "sent_successfully",
+                                        timestamp: FieldValue.serverTimestamp()
+                                    };
+                                    try {
+                                        const auditLogRef = firestore.collection('outboundAudits').doc(); // Auto-generate ID
+                                        await auditLogRef.set(auditLogData);
+                                        console.log(`[USER: ${userId}, MSG: ${messageId}] Audit log created for auto-sent message ${sendData.id}. Audit ID: ${auditLogRef.id}`);
+                                    } catch (auditError) {
+                                        console.error(`[USER: ${userId}, MSG: ${messageId}] Failed to write audit log for sent message ${sendData.id}:`, auditError);
+                                        // Do not change finalProcessingStatus; email was sent successfully.
+                                    }
+                                } else {
+                                    console.error(`[USER: ${userId}, MSG: ${messageId}] Gmail API send error: ${sendResponse.status}`, sendData);
+                                    finalProcessingStatus = "auto_send_failed";
+                                    llmErrorMessage = `Gmail API Send Error: ${sendData.error?.message || sendResponse.statusText}`;
+                                    sentMessageDetails.sendError = sendData.error || { status: sendResponse.status, statusText: sendResponse.statusText };
+                                }
+                            } catch (sendApiError) {
+                                console.error(`[USER: ${userId}, MSG: ${messageId}] Fetch error during Gmail API send:`, sendApiError.message);
+                                finalProcessingStatus = "auto_send_api_error";
+                                llmErrorMessage = `Send API Fetch Error: ${sendApiError.message}`;
+                                sentMessageDetails.sendError = { message: sendApiError.message };
+                            }
+                        }
+                    }
+                } else if (autoSendIsEnabled && (!summaryText || processingStatus !== "summarized")) {
+                    console.log(`[USER: ${userId}, MSG: ${messageId}] Auto-send enabled but conditions not met (summaryText: ${!!summaryText}, processingStatus: ${processingStatus}). Skipping auto-send.`);
+                    // Keep finalProcessingStatus as is (e.g., summarization_failed)
                 }
 
-                const processedEmailRef = firestore.collection('processedEmails').doc(messageId); 
+                const processedEmailRef = firestore.collection('processedEmails').doc(messageId);
                 const dataToStore = {
-                    userId: userId, 
-                    messageId: messageId, 
+                    userId: userId,
+                    messageId: messageId,
                     threadId: emailDetails.rawPayload ? emailDetails.rawPayload.threadId : null,
                     subject: emailDetails.subject,
                     from: emailDetails.from,
-                    date: emailDetails.date, 
+                    date: emailDetails.date,
                     snippet: emailDetails.snippet,
-                    plainBody: emailDetails.body, 
-                    summary: summaryText, 
-                    processedAt: FieldValue.serverTimestamp(), 
-                    status: finalProcessingStatus, // Use the potentially modified status
+                    plainBody: emailDetails.body,
+                    summary: summaryText,
+                    processedAt: FieldValue.serverTimestamp(),
+                    status: finalProcessingStatus, 
                 };
-                if (llmErrorMessage) { 
-                    dataToStore.errorMessage = llmErrorMessage;
-                } else if (finalProcessingStatus.includes("failed") && !llmErrorMessage) { // Ensure not to overwrite specific LLM error
-                    dataToStore.errorMessage = `Processing failed with status: ${finalProcessingStatus}`; 
+
+                if (autoSentReplyBody) {
+                    dataToStore.autoSentReplyBody = autoSentReplyBody;
+                }
+                if (sentMessageDetails.sentMessageId) {
+                    dataToStore.sentMessageId = sentMessageDetails.sentMessageId;
+                    dataToStore.sentMessageThreadId = sentMessageDetails.sentMessageThreadId;
+                }
+                if (sentMessageDetails.sendError) {
+                    dataToStore.sendErrorMessage = JSON.stringify(sentMessageDetails.sendError); // Store the error object as string
                 }
                 
-                await processedEmailRef.set(dataToStore);
+                if (llmErrorMessage) {
+                    // If there's an error message specifically from LLM (summary or reply gen) or send, use it.
+                    // Avoid overwriting a specific send error with a generic processing status message.
+                    dataToStore.errorMessage = llmErrorMessage;
+                } else if (finalProcessingStatus.includes("failed") && !dataToStore.errorMessage && !sentMessageDetails.sendError) {
+                    dataToStore.errorMessage = `Processing failed with status: ${finalProcessingStatus}`;
+                }
+                
+                await processedEmailRef.set(dataToStore, { merge: true }); // Use merge:true to avoid overwriting if document already exists partially
                 console.log(`Successfully stored/updated processed email ${messageId} with status '${finalProcessingStatus}' to Firestore.`);
                 
-                // successCount should reflect successful summarization, even if auto-send is just pending
-                if (processingStatus === "summarized" || finalProcessingStatus === "summarized_auto_send_pending") {
+                if (finalProcessingStatus === "auto_sent" || finalProcessingStatus === "summarized") {
                      successCount++;
                 } else {
-                     failureCount++; 
+                     failureCount++;
                 }
 
-            } catch (error) { 
+            } catch (error) {
                 console.error(`Unhandled error processing message ${messageId} for user ${userId}:`, error.message, error.stack);
                 failureCount++;
                 try {

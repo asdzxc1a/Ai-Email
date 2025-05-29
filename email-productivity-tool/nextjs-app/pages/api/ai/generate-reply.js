@@ -5,6 +5,10 @@ import { fetchEmailContent } from '../../../lib/gmailUtils.js';
 import { Deepseek } from '@ai-sdk/deepseek';
 import { generateText } from 'ai';
 import { verifyGoogleIdTokenAndRetrieveUser } from '../../../lib/authAddonUtils'; // Import new util
+import admin from '../../../lib/firebaseAdmin'; // Import Firebase Admin
+
+const db = admin.firestore();
+const DEFAULT_REPLY_PROMPT_ID = 'defaultReplyPrompt'; // Or 'replyGenerationDefault'
 
 export default async function handler(req, res) {
   let userData; // To store user info from either session or token
@@ -53,50 +57,72 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Could not retrieve email content.' });
     }
 
-    let prompt = `You are an AI assistant helping a user draft a reply to an email.
-Here is the original email they received:
-
-From: ${emailDetails.from}
-Subject: ${emailDetails.subject}
-Received At: ${emailDetails.date}
-
+    // Fetch prompt template from Firestore
+    let promptTemplateString;
+    try {
+      const promptDoc = await db.collection('promptLibrary').doc(DEFAULT_REPLY_PROMPT_ID).get();
+      if (promptDoc.exists && promptDoc.data().template) {
+        promptTemplateString = promptDoc.data().template;
+        console.log(`Successfully fetched prompt '${DEFAULT_REPLY_PROMPT_ID}' from Firestore.`);
+      } else {
+        console.warn(`Prompt document '${DEFAULT_REPLY_PROMPT_ID}' not found in 'promptLibrary' or template field missing. Falling back to a hardcoded default prompt.`);
+        // Fallback hardcoded prompt string
+        promptTemplateString = `You are an AI assistant.
+Original Email Details:
+From: {{originalFrom}}
+Subject: {{originalSubject}}
+Received At: {{originalDate}}
 Body:
-${emailDetails.body}
-
+{{originalEmailBody}}
 ---
-`;
-
-    if (replyContext) {
-      prompt += `The user has provided the following instructions or context for the reply:
-"${replyContext.replace(/"/g, '\\"')}"
+User's Instructions/Context for Reply: "{{userContext}}"
 ---
-`;
+Draft a {{tone}} reply to the original email based on the user's instructions.
+Generate only the body of the reply.`;
+      }
+    } catch (error) {
+      console.error(`Error fetching prompt '${DEFAULT_REPLY_PROMPT_ID}' from Firestore:`, error);
+      console.warn(`Falling back to a hardcoded default prompt due to Firestore error.`);
+      // Fallback hardcoded prompt string in case of any error during fetch
+      promptTemplateString = `You are an AI assistant.
+Original Email Details:
+From: {{originalFrom}}
+Subject: {{originalSubject}}
+Received At: {{originalDate}}
+Body:
+{{originalEmailBody}}
+---
+User's Instructions/Context for Reply: "{{userContext}}"
+---
+Draft a {{tone}} reply to the original email based on the user's instructions.
+Generate only the body of the reply.`;
     }
 
     const actualTone = tone || 'professional';
-    prompt += `Please draft a ${actualTone} reply to this email.
-If the original email asks a question, try to answer it.
-If it's a statement, acknowledge it appropriately.
-Keep the reply concise and relevant to the original email's content and user's instructions.
-Do not invent information not present in the original email or user's context.
-Focus on being helpful and clear.
-Generate only the body of the reply, without any greetings like "Hi [User's Name]," or sign-offs like "Best regards, [User's Name]", unless specifically instructed by the user's context.`;
+
+    // Dynamically construct the prompt using the template and available data
+    let finalPrompt = promptTemplateString;
+    finalPrompt = finalPrompt.replace(/{{originalEmailBody}}/g, emailDetails.body || '');
+    finalPrompt = finalPrompt.replace(/{{userContext}}/g, replyContext || ''); // Ensure undefined is handled as empty string
+    finalPrompt = finalPrompt.replace(/{{tone}}/g, actualTone || 'professional');
+    finalPrompt = finalPrompt.replace(/{{originalFrom}}/g, emailDetails.from || '');
+    finalPrompt = finalPrompt.replace(/{{originalSubject}}/g, emailDetails.subject || '');
+    finalPrompt = finalPrompt.replace(/{{originalDate}}/g, emailDetails.date || '');
+    // Add any other placeholders as needed, e.g., {{userName}} if available and desired in prompt
+
+    console.log(`Using prompt (first 100 chars): ${finalPrompt.substring(0,100)}...`);
     
-    // TODO: Load reply generation prompt dynamically from Firestore 'promptLibrary' collection (e.g., document ID 'replyGenerationDefault' or based on tone/context) instead of the current hardcoded/default approach. Implement error handling for prompt fetching.
-    // Log placeholder for dynamic prompt loading
-    console.info(`INFO: Using hardcoded/default reply generation prompt. Dynamic prompt loading from Firestore 'promptLibrary' collection (document ID: 'replyGenerationDefault') is pending implementation.`);
-    
-    const MAX_PROMPT_LENGTH = 20000;
-    if (prompt.length > MAX_PROMPT_LENGTH) {
-      prompt = prompt.substring(0, MAX_PROMPT_LENGTH) + "... (prompt truncated)";
-      console.warn(`Warning: Prompt for messageId ${messageId} was truncated.`);
+    const MAX_PROMPT_LENGTH = 20000; // Keep a safeguard for prompt length
+    if (finalPrompt.length > MAX_PROMPT_LENGTH) {
+      finalPrompt = finalPrompt.substring(0, MAX_PROMPT_LENGTH) + "... (prompt truncated)";
+      console.warn(`Warning: Final prompt for messageId ${messageId} was truncated.`);
     }
         
     const deepseek = new Deepseek();
     const { text: draftReply } = await generateText({
       model: deepseek.chat('deepseek-chat'),
-      prompt: prompt,
-      temperature: 0.6 // Added temperature
+      prompt: finalPrompt, // Use the dynamically constructed prompt
+      temperature: 0.6 // Adjusted temperature, can also be part of prompt template or user setting
     });
 
     if (!draftReply) {
