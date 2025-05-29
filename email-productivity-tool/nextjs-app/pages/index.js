@@ -17,6 +17,12 @@ export default function HomePage() {
   const [selectedEmailId, setSelectedEmailId] = useState(null);
   const [feedbackStatus, setFeedbackStatus] = useState({}); // For summary feedback
 
+  // States for Draft Reply Feedback
+  const [originalDraftForFeedback, setOriginalDraftForFeedback] = useState('');
+  const [editableDraft, setEditableDraft] = useState('');
+  const [replyThumbsVote, setReplyThumbsVote] = useState(null); // 'up', 'down', or null
+  const [replyFeedbackSubmissionStatus, setReplyFeedbackSubmissionStatus] = useState('idle'); // idle, loading, success, error
+
   const toneOptions = ["professional", "casual", "friendly", "concise", "declined_politely"];
 
   useEffect(() => {
@@ -105,9 +111,21 @@ export default function HomePage() {
         body: JSON.stringify(payload), 
       });
       const data = await res.json();
-      setApiResponse(data.error ? { error: data.error, details: data.details } : { draftReply: data.draftReply });
+      if (res.ok && data.draftReply) {
+        setOriginalDraftForFeedback(data.draftReply);
+        setEditableDraft(data.draftReply);
+        setReplyThumbsVote(null); // Reset thumbs for new draft
+        setReplyFeedbackSubmissionStatus('idle'); // Reset submission status
+        setApiResponse({ draftReply: data.draftReply }); // Keep apiResponse for rendering
+      } else {
+        setOriginalDraftForFeedback(''); // Clear if error or no draft
+        setEditableDraft('');
+        setApiResponse(data.error ? { error: data.error, details: data.details } : { error: "No draft reply generated." });
+      }
     } catch (error) {
       console.error('Frontend error calling /api/ai/generate-reply:', error);
+      setOriginalDraftForFeedback('');
+      setEditableDraft('');
       setApiResponse({ error: 'Client-side error. Check console.' });
     }
     setIsLoading(false);
@@ -125,13 +143,60 @@ export default function HomePage() {
   // Function to render the API response
   const renderApiResponse = () => {
     if (!apiResponse) return null;
+
+    const isDraftReplyAvailable = !!apiResponse.draftReply;
+
     return (
       <div style={{ marginTop: '10px', padding: '10px', border: '1px dashed #bbb', backgroundColor: '#f0f0f0' }}>
         <h4>AI Action Response:</h4>
         {apiResponse.summary && <p><strong>Summary:</strong> {apiResponse.summary}</p>}
-        {apiResponse.draftReply && <p><strong>Draft Reply:</strong><pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', marginTop: '5px', border: '1px solid #eee', padding: '10px', backgroundColor: 'white' }}>{apiResponse.draftReply}</pre></p>}
-        {apiResponse.error && <p style={{ color: 'red' }}><strong>Error:</strong> {apiResponse.error}</p>}
-        {(apiResponse.details || (apiResponse.error && !apiResponse.summary && !apiResponse.draftReply)) && 
+        
+        {isDraftReplyAvailable && (
+          <div>
+            <strong>Draft Reply:</strong>
+            <textarea 
+              value={editableDraft} 
+              onChange={(e) => setEditableDraft(e.target.value)} 
+              rows={10} 
+              style={{ width: 'calc(100% - 20px)', padding: '8px', marginTop: '5px', border: '1px solid #ccc', fontFamily: 'inherit' }} 
+            />
+            <div style={{ marginTop: '10px', marginBottom: '10px' }}>
+              Rate this draft:
+              <button 
+                onClick={() => setReplyThumbsVote('up')} 
+                style={{ 
+                  marginLeft: '10px', padding: '5px 8px',
+                  backgroundColor: replyThumbsVote === 'up' ? 'lightgreen' : 'transparent',
+                  border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer'
+                }}
+              >
+                👍 Up
+              </button>
+              <button 
+                onClick={() => setReplyThumbsVote('down')} 
+                style={{ 
+                  marginLeft: '5px', padding: '5px 8px',
+                  backgroundColor: replyThumbsVote === 'down' ? 'lightpink' : 'transparent',
+                  border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer'
+                }}
+              >
+                👎 Down
+              </button>
+            </div>
+            <button 
+              onClick={handleSubmitReplyFeedback} 
+              disabled={replyFeedbackSubmissionStatus === 'loading'}
+              style={{ padding: '8px 12px', cursor: replyFeedbackSubmissionStatus === 'loading' ? 'default' : 'pointer', border: '1px solid #007bff', backgroundColor: '#007bff', color: 'white', borderRadius: '4px'}}
+            >
+              {replyFeedbackSubmissionStatus === 'loading' ? 'Submitting Feedback...' : 'Save Draft Feedback'}
+            </button>
+            {replyFeedbackSubmissionStatus === 'success' && <p style={{color: 'green', marginTop: '5px'}}>Feedback saved! Thank you.</p>}
+            {replyFeedbackSubmissionStatus === 'error' && <p style={{color: 'red', marginTop: '5px'}}>Error saving feedback. Please try again.</p>}
+          </div>
+        )}
+
+        {apiResponse.error && !isDraftReplyAvailable && <p style={{ color: 'red' }}><strong>Error:</strong> {apiResponse.error}</p>}
+        {(apiResponse.details || (apiResponse.error && !apiResponse.summary && !isDraftReplyAvailable)) && 
           <details style={{ marginTop: '10px' }}>
             <summary>Error Details</summary>
             <pre style={{ whiteSpace: 'pre-wrap', backgroundColor: '#eee', padding: '10px', marginTop: '5px' }}>
@@ -338,3 +403,60 @@ export default function HomePage() {
     </>
    );
 }
+
+const handleSubmitReplyFeedback = async () => {
+  // Determine the correct messageId for the email being replied to.
+  // This relies on selectedEmailId if feedback is for listed emails,
+  // or messageIdInput if for direct ID testing.
+  // Ensure this logic aligns with how targetMessageId is determined in handleGenerateReply
+  const currentMessageIdForReply = selectedEmailId || messageIdInput; 
+
+  if (!currentMessageIdForReply) {
+    alert("Message ID for feedback is missing. Please ensure an email context is selected or ID is entered.");
+    return;
+  }
+  if (originalDraftForFeedback === undefined || originalDraftForFeedback === null) {
+     alert("Original AI draft is missing. Cannot submit feedback.");
+     return;
+  }
+
+
+  setReplyFeedbackSubmissionStatus('loading');
+  try {
+    const response = await fetch('/api/feedback/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messageId: currentMessageIdForReply,
+        originalAiDraft: originalDraftForFeedback,
+        finalUserDraft: editableDraft, // This comes from the textarea
+        thumbsFeedback: replyThumbsVote, // This comes from the up/down buttons state
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || `Failed to submit reply feedback (${response.status})`);
+    }
+    setReplyFeedbackSubmissionStatus('success');
+    // Optionally, reset states or give further user feedback
+    // For example, disable feedback buttons for this draft after successful submission:
+    // setOriginalDraftForFeedback(''); // This would clear the feedback UI for this draft
+    
+    // Clear success message after some time
+    setTimeout(() => {
+        if(replyFeedbackSubmissionStatus === 'success') { // Check if it's still success
+            setReplyFeedbackSubmissionStatus('idle');
+        }
+    }, 4000);
+
+  } catch (error) {
+    console.error("Error submitting reply feedback:", error);
+    setReplyFeedbackSubmissionStatus('error');
+     // Clear error message after some time
+     setTimeout(() => {
+        if(replyFeedbackSubmissionStatus === 'error') {
+            setReplyFeedbackSubmissionStatus('idle');
+        }
+    }, 4000);
+  }
+};

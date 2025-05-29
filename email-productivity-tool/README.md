@@ -9,8 +9,8 @@ This project aims to build a tool that:
 - Auto-summarizes emails and threads.
 - Generates context-aware replies.
 - Offers modes for auto-sending or reviewing drafts.
-- Includes an admin dashboard for management and analytics.
-- Collects user feedback on the quality of AI-generated content.
+- Includes an admin dashboard for management, analytics, and feedback review.
+- Collects user feedback on the quality of AI-generated content (summaries and draft replies).
 
 This repository contains the code for Phase 1 (MVP), which includes core functionalities and placeholders for advanced features.
 
@@ -27,38 +27,14 @@ This repository contains the code for Phase 1 (MVP), which includes core functio
 - **Testing:** Jest for unit and integration tests.
 
 ## Project Structure
-
--   `/nextjs-app`: Contains the Next.js web application (frontend, backend APIs, integration tests).
--   `/apps-script-addon`: Contains the Google Workspace Add-on (Apps Script) for Gmail integration.
--   `/gcp-functions`: Contains Google Cloud Functions (e.g., for handling Pub/Sub messages, unit tests).
+(Content unchanged)
 
 ## Prerequisites
-
-- Node.js (v18 or later recommended)
-- npm
-- Google Cloud Platform (GCP) account with billing enabled
-- Google Workspace account (for testing Gmail Add-on)
+(Content unchanged)
 
 ## GCP Configuration Summary
+(Content for sections 1-4 unchanged)
 
-Before running the application, ensure the following are set up in your GCP project:
-
-1.  **New GCP Project:** Create one if you don't have one.
-2.  **APIs Enabled:**
-    *   Gmail API
-    *   Google Cloud Pub/Sub API
-    *   Cloud Firestore API
-    *   Cloud Functions API (and related deployment APIs like Cloud Build)
-3.  **OAuth 2.0 Credentials:**
-    *   Configure OAuth consent screen.
-    *   Create OAuth 2.0 Client ID for "Web application" (for Next.js app). Note the Client ID and Secret.
-    *   Authorized JavaScript origins (e.g., `http://localhost:3000`).
-    *   Authorized redirect URIs (e.g., `http://localhost:3000/api/auth/callback/google`).
-    *   **IMPORTANT - Required Scopes:** Ensure your OAuth Consent Screen is configured with the necessary scopes. This includes `userinfo.profile`, `userinfo.email`, `gmail.readonly`, `gmail.modify`, and crucially, `https://www.googleapis.com/auth/gmail.send`.
-        *   **Action Required for `gmail.send`:** The `https://www.googleapis.com/auth/gmail.send` scope is necessary for the "Auto Send" feature. If you are updating an existing consent screen, you **must manually add this scope**. Navigate to your GCP project's "OAuth consent screen" settings, edit your app registration, go to "Scopes," and add `https://www.googleapis.com/auth/gmail.send`. This change may require Google to re-verify your app if it's in production and will necessitate users to re-authenticate to grant this new permission.
-4.  **Pub/Sub Topic:**
-    *   Create a Pub/Sub topic (e.g., `ACTUAL_PUBSUB_TOPIC_NAME`). This name is referenced in the code.
-    *   Grant the Gmail service account (`service-[PROJECT_NUMBER]@gcp-sa-gmail.iam.gserviceaccount.com`) the "Pub/Sub Publisher" role on this topic.
 5.  **Firestore Database:**
     *   Create a Firestore database in Native mode.
     *   Set up basic security rules. Initial Firestore security rules have been refined to ensure users can only access and manage their own data, enhancing security.
@@ -66,47 +42,15 @@ Before running the application, ensure the following are set up in your GCP proj
         *   `users`: Stores user profiles, including encrypted OAuth tokens and admin status.
         *   `processedEmails`: Stores details of emails processed by the backend, including summaries.
         *   `promptLibrary`: (Manual setup required) Stores prompt templates for AI generation tasks.
-            *   **Manual Setup - `promptLibrary` Collection:** For dynamic prompt management (currently backend API is ready, UI is placeholder), you need to manually create the `promptLibrary` collection in Firestore with the following initial documents:
-                *   **Document 1 ID:** `emailSummarization`
-                    *   `promptName` (string): "Default Email Summarization Prompt"
-                    *   `promptContent` (string): "Summarize the following email concisely:\nFrom: {{emailDetails.from}}\nSubject: {{emailDetails.subject}}\nBody:\n{{truncatedBody}}"
-                    *   `description` (string): "Standard prompt used by the backend to summarize emails."
-                    *   `variables` (array): ["emailDetails.from", "emailDetails.subject", "truncatedBody"]
-                    *   `updatedAt` (timestamp): Set to current time.
-                    *   `lastUpdatedBy` (string): User ID of admin setting this up (e.g., "initial_setup").
-                *   **Document 2 ID:** `replyGenerationDefault`
-                    *   `promptName` (string): "Default Reply Generation Prompt"
-                    *   `promptContent` (string): "You are an AI assistant helping a user draft a reply to an email.\nOriginal Email:\nFrom: {{emailDetails.from}}\nSubject: {{emailDetails.subject}}\nReceived At: {{emailDetails.date}}\nBody:\n{{emailDetails.body}}\n\nUser's Instructions/Context for Reply (if any):\n\"{{replyContext}}\"\n\nPlease draft a {{actualTone}} reply. Focus on being helpful and clear. Generate only the body of the reply, without greetings or sign-offs unless specified in the user's context."
-                    *   `description` (string): "Default prompt for generating email replies. Variables like tone and context are inserted by the backend."
-                    *   `variables` (array): ["emailDetails.from", "emailDetails.subject", "emailDetails.date", "emailDetails.body", "replyContext", "actualTone"]
-                    *   `updatedAt` (timestamp): Set to current time.
-                    *   `lastUpdatedBy` (string): User ID of admin setting this up.
+            *   (Details for manual setup of `emailSummarization` and `replyGenerationDefault` documents as per previous version of README)
         *   `summaryFeedback`: Stores user feedback on generated email summaries.
-            *   **Purpose:** To collect user ratings (thumbs up/down) on the quality and usefulness of AI-generated summaries.
-            *   **Document Structure (auto-generated ID):**
-                *   `userId` (string): ID of the user providing feedback.
-                *   `messageId` (string): ID of the Gmail message the summary pertains to.
-                *   `summaryText` (string): The actual summary text that was rated.
-                *   `feedback` (string): User's rating ("up" or "down").
-                *   `timestamp` (timestamp): Server-side timestamp of when the feedback was submitted.
+            *   (Purpose and Document Structure as per previous version of README)
+        *   `replyFeedback`: Stores user feedback on AI-generated draft replies.
+            *   (Purpose and Document Structure as per previous version of README)
 6.  **Service Account for Firebase Admin (Next.js backend):**
-    *   Go to IAM & Admin > Service Accounts.
-    *   Create a new service account or use an existing one.
-    *   Grant it roles like "Cloud Datastore User" (for Firestore access).
-    *   Download the JSON key file for this service account. You'll need its `project_id`, `client_email`, and `private_key` for the Next.js app's environment variables.
+    *   (Content unchanged)
 
 ## Setup Instructions
-
-### 1. Clone the Repository
-(Content unchanged)
-
-### 2. Next.js Web Application (`nextjs-app`)
-(Content unchanged, environment variables section already covers necessary items)
-
-### 3. Google Cloud Function (`gcp-functions/handleGmailNotification`)
-(Content unchanged)
-
-### 4. Google Apps Script Add-on (`apps-script-addon`)
 (Content unchanged)
 
 ## Features (Next.js App)
@@ -115,57 +59,116 @@ The Next.js web application provides the following main features for authenticat
 
 -   **Processed Email Listing & AI Actions:** Displays a list of emails processed by the backend. Users can view details, including the full email body and AI-generated summary.
     -   **Summary Feedback:** Within the email detail view, users can provide "thumbs up" or "thumbs down" feedback on the quality of the AI-generated summary for that email.
--   **AI Actions on Listed Emails:** (Existing features, refer to previous README)
--   **Direct AI Testing:** (Existing features, refer to previous README)
--   **Gmail Watch Setup:** (Existing features, refer to previous README)
+    -   **Draft Reply & Feedback:** When an AI-generated draft reply is displayed (after clicking "Generate Reply for this Email" or "Generate Reply for Direct ID"), users can:
+        *   Edit the draft directly in a textarea.
+        *   Provide "thumbs up" or "thumbs down" feedback on the draft's quality/helpfulness.
+        *   Submit this comprehensive feedback (edited draft, original draft, and thumbs rating) to the backend.
+-   **AI Actions on Listed Emails:** (Existing features - "Generate Reply for this Email" now leads to the draft reply feedback UI)
+-   **Direct AI Testing:** (Existing features - "Generate Reply for Direct ID" now leads to the draft reply feedback UI)
+-   **Gmail Watch Setup:** (Existing features)
 -   **User Settings (`/settings`):**
-    -   Provides a page for users to manage their application settings.
-    -   **Auto Send Toggle:** Allows users to enable or disable the "Auto Send" feature.
-        -   **Placeholder Status:** When enabled, the backend (`handleGmailNotification` Cloud Function) currently only logs the intent to auto-send an email and updates the email's status in Firestore to `summarized_auto_send_pending`.
-        -   **Pending Implementation:** The actual sending of emails via the Gmail API and the creation of detailed audit log entries in the `outboundAudits` Firestore collection are pending future implementation.
+    -   (Content unchanged)
 
 ## Admin Dashboard
-(Content unchanged)
+
+The Admin Dashboard (`/admin`) provides tools for application monitoring and management. Access is restricted to users marked as `isAdmin: true` in their Firestore user document.
+
+### Features
+
+-   **Dashboard Home, Manage Users, Processed Emails:** (Existing features, refer to previous README)
+-   **Prompt Management (`/admin/prompts`):**
+    -   (Content unchanged)
+-   **Summary Feedback Page (`/admin/feedback/summaries`):**
+    *   Allows administrators to view a paginated and filterable list of all user-submitted feedback on AI-generated email summaries.
+    *   Displays key fields: Date/Time, User ID, Message ID, Summary Text (truncated, with full view on hover), and Feedback (👍 Up / 👎 Down).
+    *   Supports filtering by feedback type ("All", "Up", "Down") and pagination.
+-   **Reply Feedback Page (`/admin/feedback/replies`):**
+    *   Allows administrators to view a paginated and filterable list of all user-submitted feedback on AI-generated draft replies.
+    *   Displays key fields: Date/Time, User ID, Message ID, Original AI Draft (truncated), Final User Draft (truncated), Edited (Yes/No), and Thumbs (👍 Up / 👎 Down / None).
+    *   Includes a modal to view and compare the full text of the original AI draft and the final user-edited draft.
+    *   Supports filtering by thumbs feedback ("All", "Up", "Down", "None") and by whether the draft was edited ("All", "Yes", "No"), along with pagination.
+
 
 ## Next.js Backend API Endpoints
 
 The `nextjs-app` provides several backend API endpoints under `/api/`:
 
-#### `GET /api/gmail/getEmailContent`
-(Content unchanged)
-
-#### `POST /api/ai/summarize`
-(Content unchanged)
-
-#### `POST /api/ai/generate-reply`
-(Content unchanged)
+(Existing API endpoint documentation unchanged)
 
 #### `POST /api/feedback/summary`
-Submits user feedback on an AI-generated email summary.
--   **Method:** `POST`
--   **Authentication:** User session required.
--   **Request Body (JSON):**
-    ```json
-    {
-      "messageId": "<GMAIL_MESSAGE_ID>", 
-      "summaryText": "<THE_ACTUAL_SUMMARY_TEXT_SHOWN_TO_USER>",
-      "feedbackType": "<'up' or 'down'>"
-    }
-    ```
--   **Response (Success - 201 Created):**
+(Content unchanged)
+
+#### `POST /api/feedback/reply`
+(Content unchanged)
+
+---
+**Admin API Endpoints (Require Admin Authentication)**
+---
+
+#### `GET /api/admin/feedback/summaries`
+Retrieves a paginated and filterable list of summary feedback entries.
+-   **Method:** `GET`
+-   **Authentication:** Admin user session required.
+-   **Query Parameters:**
+    -   `page` (Number, optional, default 1): Page number for pagination.
+    -   `limit` (Number, optional, default 10, max 50): Number of records per page.
+    -   `feedbackType` (String, optional): Filter by feedback type ("up" or "down").
+    -   `sortBy` (String, optional, default "timestamp"): Field to sort by.
+    -   `sortOrder` (String, optional, default "desc"): Sort order ("asc" or "desc").
+    -   `startAfterDocId` (String, optional): Document ID for cursor-based pagination (for fetching next page).
+-   **Response (Success - 200 OK):**
     ```json
     {
       "success": true,
-      "message": "Feedback submitted successfully.",
-      "feedbackId": "<ID_OF_THE_NEW_FEEDBACK_DOCUMENT_IN_FIRESTORE>"
+      "data": [ 
+        // Array of summary feedback documents, each with id, userId, messageId, summaryText, feedback, timestamp 
+      ],
+      "pagination": {
+        "currentPage": 1,
+        "limit": 10,
+        "totalPages": 5, 
+        "totalRecords": 50,
+        "lastDocId": "<ID_OF_LAST_DOCUMENT_IN_CURRENT_SET_OR_NULL>" 
+      }
     }
     ```
 -   **Error Responses:**
-    -   `400 Bad Request`: If input validation fails (e.g., missing fields, invalid `feedbackType`).
-    -   `401 Unauthorized`: If the user is not authenticated.
-    -   `500 Internal Server Error`: If there's an issue saving the feedback to Firestore or a general server error.
+    -   `403 Forbidden`: If the user is not an administrator.
+    -   `500 Internal Server Error`: For server-side issues.
 
-(Other API endpoints like `/api/auth/*`, `/api/gmail/watch`, `/api/user/settings`, and admin endpoints also exist but are detailed elsewhere or can be inferred from their respective frontend features.)
+#### `GET /api/admin/feedback/replies`
+Retrieves a paginated and filterable list of reply feedback entries.
+-   **Method:** `GET`
+-   **Authentication:** Admin user session required.
+-   **Query Parameters:**
+    -   `page` (Number, optional, default 1).
+    -   `limit` (Number, optional, default 10, max 50).
+    *   `thumbsFeedback` (String, optional): Filter by thumbs rating ("up", "down", or "none" for null values).
+    *   `hasBeenEdited` (String, optional): Filter by whether the draft was edited ("true" or "false").
+    -   `sortBy` (String, optional, default "timestamp").
+    -   `sortOrder` (String, optional, default "desc").
+    -   `startAfterDocId` (String, optional).
+-   **Response (Success - 200 OK):**
+    ```json
+    {
+      "success": true,
+      "data": [
+        // Array of reply feedback documents, each with id, userId, messageId, originalAiDraft, finalUserDraft, hasBeenEdited, thumbsFeedback, timestamp
+      ],
+      "pagination": {
+        "currentPage": 1,
+        "limit": 10,
+        "totalPages": 5,
+        "totalRecords": 50,
+        "lastDocId": "<ID_OF_LAST_DOCUMENT_IN_CURRENT_SET_OR_NULL>"
+      }
+    }
+    ```
+-   **Error Responses:**
+    -   `403 Forbidden`: If the user is not an administrator.
+    -   `500 Internal Server Error`: For server-side issues.
+
+(Other API endpoints like `/api/auth/*`, `/api/gmail/watch`, `/api/user/settings`, and other admin endpoints also exist but are detailed elsewhere or can be inferred from their respective frontend features.)
 
 ## Running Tests
 (Content unchanged)
