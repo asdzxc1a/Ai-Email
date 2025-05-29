@@ -15,6 +15,7 @@ export default function HomePage() {
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
   const [fetchEmailsError, setFetchEmailsError] = useState(null);
   const [selectedEmailId, setSelectedEmailId] = useState(null);
+  const [feedbackStatus, setFeedbackStatus] = useState({}); // For summary feedback
 
   const toneOptions = ["professional", "casual", "friendly", "concise", "declined_politely"];
 
@@ -197,6 +198,47 @@ export default function HomePage() {
                     </div>
                     {/* Display API response for actions on THIS email */}
                     {renderApiResponse()} 
+
+                    {/* --- Feedback Buttons --- */}
+                    {email.summary && (
+                      <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
+                        <strong>Rate this summary:</strong>
+                        <button 
+                          onClick={() => handleFeedback(email.docId, email.summary, 'up')}
+                          disabled={feedbackStatus[email.docId] === 'loading' || feedbackStatus[email.docId] === 'up'}
+                          style={{ 
+                            marginLeft: '10px', 
+                            padding: '5px 8px',
+                            cursor: (feedbackStatus[email.docId] === 'loading' || feedbackStatus[email.docId] === 'up') ? 'default' : 'pointer',
+                            backgroundColor: feedbackStatus[email.docId] === 'up' ? 'lightgreen' : 'transparent',
+                            border: '1px solid #ccc',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          👍 Up
+                        </button>
+                        <button 
+                          onClick={() => handleFeedback(email.docId, email.summary, 'down')}
+                          disabled={feedbackStatus[email.docId] === 'loading' || feedbackStatus[email.docId] === 'down'}
+                          style={{ 
+                            marginLeft: '5px', 
+                            padding: '5px 8px',
+                            cursor: (feedbackStatus[email.docId] === 'loading' || feedbackStatus[email.docId] === 'down') ? 'default' : 'pointer',
+                            backgroundColor: feedbackStatus[email.docId] === 'down' ? 'lightpink' : 'transparent',
+                            border: '1px solid #ccc',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          👎 Down
+                        </button>
+                        {feedbackStatus[email.docId] === 'loading' && <span style={{ marginLeft: '10px', fontStyle: 'italic' }}>Saving feedback...</span>}
+                        {feedbackStatus[email.docId] === 'error' && <span style={{ marginLeft: '10px', color: 'red' }}>Error submitting feedback!</span>}
+                        {(feedbackStatus[email.docId] === 'up' || feedbackStatus[email.docId] === 'down') && 
+                         feedbackStatus[email.docId] !== 'loading' && feedbackStatus[email.docId] !== 'error' &&
+                            <span style={{ marginLeft: '10px', color: 'green' }}>Thanks for your feedback!</span>
+                        }
+                      </div>
+                    )}
                   </div>
                 )}
               </li>
@@ -233,6 +275,60 @@ export default function HomePage() {
       </>
     );
   }
+
+  const handleFeedback = async (messageId, summaryText, feedbackType) => {
+    if (!session) {
+      alert("Please sign in to provide feedback.");
+      return; 
+    }
+  
+    setFeedbackStatus(prev => ({ ...prev, [messageId]: 'loading' }));
+    let temporarySuccessClearer = null; // To manage clearing "Thanks" message
+  
+    try {
+      const response = await fetch('/api/feedback/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messageId: messageId, // This should be the actual Gmail message ID
+          summaryText: summaryText,
+          feedbackType: feedbackType,
+        }),
+      });
+  
+      const data = await response.json(); 
+  
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to submit feedback (${response.status})`);
+      }
+      
+      setFeedbackStatus(prev => ({ ...prev, [messageId]: feedbackType })); 
+      console.log("Feedback submitted successfully:", data.message);
+
+      // Clear "Thanks" message after a few seconds
+      temporarySuccessClearer = setTimeout(() => {
+        // Only clear if it's still in the 'up' or 'down' state from this submission,
+        // not if it became 'loading' or 'error' again for some reason.
+        setFeedbackStatus(prev => {
+            if (prev[messageId] === feedbackType && prev[messageId] !== 'loading' && prev[messageId] !== 'error') {
+                return { ...prev, [messageId]: `submitted_${feedbackType}` }; // Or just null to re-enable
+            }
+            return prev;
+        });
+      }, 3000); 
+  
+    } catch (err) {
+      console.error("Error submitting feedback:", err);
+      setFeedbackStatus(prev => ({ ...prev, [messageId]: 'error' }));
+    }
+    // Cleanup timeout if component unmounts or another feedback is submitted for the same item
+    return () => {
+        if (temporarySuccessClearer) {
+            clearTimeout(temporarySuccessClearer);
+        }
+    };
+  };
+
   // Sign-in UI remains unchanged
   return ( 
     <>
