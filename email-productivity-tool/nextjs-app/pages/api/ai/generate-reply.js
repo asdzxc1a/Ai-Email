@@ -82,6 +82,10 @@ Do not invent information not present in the original email or user's context.
 Focus on being helpful and clear.
 Generate only the body of the reply, without any greetings like "Hi [User's Name]," or sign-offs like "Best regards, [User's Name]", unless specifically instructed by the user's context.`;
     
+    // TODO: Load reply generation prompt dynamically from Firestore 'promptLibrary' collection (e.g., document ID 'replyGenerationDefault' or based on tone/context) instead of the current hardcoded/default approach. Implement error handling for prompt fetching.
+    // Log placeholder for dynamic prompt loading
+    console.info(`INFO: Using hardcoded/default reply generation prompt. Dynamic prompt loading from Firestore 'promptLibrary' collection (document ID: 'replyGenerationDefault') is pending implementation.`);
+    
     const MAX_PROMPT_LENGTH = 20000;
     if (prompt.length > MAX_PROMPT_LENGTH) {
       prompt = prompt.substring(0, MAX_PROMPT_LENGTH) + "... (prompt truncated)";

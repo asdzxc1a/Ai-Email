@@ -107,74 +107,147 @@ exports.handleGmailNotification = async (pubSubEvent, context) => {
         return;
     }
     newMessages = [...new Set(newMessages)]; // Remove duplicates
-    console.log(`Found ${newMessages.length} new INBOX message(s) for user ${userId}. IDs: ${newMessages.join(', ')}`);
     
-    const firstNewMessageId = newMessages[0];
-    console.log(`Fetching content for message ${firstNewMessageId} for user ${userId}...`);
-    const emailDetails = await fetchEmailContent(userAccessToken, firstNewMessageId);
-    console.log(`Successfully fetched content for message ${firstNewMessageId}: Subject - "${emailDetails.subject}"`);
+    if (newMessages.length > 0) {
+        console.log(`Found ${newMessages.length} new INBOX message(s) for user ${userId}. IDs: ${newMessages.join(', ')}. Processing all...`);
+        let successCount = 0;
+        let failureCount = 0;
 
-    let summaryText = null;
-    let processingStatus = "content_fetched"; // Default status
+        for (const messageId of newMessages) {
+            try {
+                console.log(`Processing message ${messageId} for user ${userId}...`);
+                let emailDetails;
+                try {
+                    emailDetails = await fetchEmailContent(userAccessToken, messageId);
+                } catch (fetchError) {
+                    console.error(`Error fetching content for message ${messageId}:`, fetchError.message);
+                    await firestore.collection('processedEmails').doc(messageId).set({
+                        userId: userId,
+                        messageId: messageId,
+                        status: 'fetch_failed',
+                        errorMessage: fetchError.message,
+                        processedAt: FieldValue.serverTimestamp()
+                    }, { merge: true });
+                    failureCount++;
+                    continue; // Skip to next message
+                }
 
-    if (emailDetails && emailDetails.body) {
-      const maxBodyLength = 15000;
-      const truncatedBody = emailDetails.body.length > maxBodyLength 
-                           ? emailDetails.body.substring(0, maxBodyLength) + "..." 
-                           : emailDetails.body;
-      const prompt = `Summarize the following email concisely:
+                if (!emailDetails) {
+                    console.warn(`Could not fetch details for message ${messageId}. Skipping.`);
+                    await firestore.collection('processedEmails').doc(messageId).set({
+                        userId: userId,
+                        messageId: messageId,
+                        status: 'fetch_empty', // Or a more specific status
+                        processedAt: FieldValue.serverTimestamp()
+                    }, { merge: true });
+                    failureCount++;
+                    continue; 
+                }
+                console.log(`Successfully fetched content for message ${messageId}: Subject - "${emailDetails.subject}"`);
+
+                let summaryText = null;
+                let processingStatus = "content_fetched"; // Default status after successful fetch
+                let llmErrorMessage = null; // To store potential LLM error message
+
+                if (emailDetails.body) {
+                    const maxBodyLength = 15000;
+                    const truncatedBody = emailDetails.body.length > maxBodyLength 
+                                       ? emailDetails.body.substring(0, maxBodyLength) + "..." 
+                                       : emailDetails.body;
+                    // Log placeholder for dynamic prompt loading
+                    // TODO: Load summarization prompt dynamically from Firestore 'promptLibrary' collection (document ID: 'emailSummarization') instead of using this hardcoded version. Implement error handling for prompt fetching.
+                    console.info(`[${context.eventId || 'N/A'}] INFO: Using hardcoded summarization prompt. Dynamic prompt loading from Firestore 'promptLibrary' collection (document ID: 'emailSummarization') is pending implementation.`);
+                    const prompt = `Summarize the following email concisely:
 From: ${emailDetails.from}
 Subject: ${emailDetails.subject}
 Body:
 ${truncatedBody}`;
-      console.log(`Sending prompt to DeepSeek for message ${firstNewMessageId}...`);
-      try {
-        const { text: llmSummary } = await generateText({
-          model: deepseek.chat('deepseek-chat'),
-          prompt: prompt,
-          temperature: 0.3 // Added temperature
-        });
-        if (llmSummary) {
-          summaryText = llmSummary;
-          processingStatus = "summarized"; // Update status if summarization is successful
-          console.log(`Generated Summary for message ${firstNewMessageId}: "${summaryText.substring(0,100)}..."`);
-        } else {
-          console.warn(`LLM returned an empty summary for message ${firstNewMessageId}.`);
-          processingStatus = "summarization_empty";
+                    console.log(`Sending prompt to DeepSeek for message ${messageId}...`);
+                    try {
+                        const { text: llmSummary } = await generateText({
+                            model: deepseek.chat('deepseek-chat'), 
+                            prompt: prompt,
+                            temperature: 0.3
+                        });
+                        if (llmSummary) {
+                            summaryText = llmSummary;
+                            processingStatus = "summarized";
+                            console.log(`Generated Summary for message ${messageId}: "${summaryText.substring(0,100)}..."`);
+                        } else {
+                            console.warn(`LLM returned an empty summary for message ${messageId}.`);
+                            processingStatus = "summarization_empty";
+                        }
+                    } catch (llmError) {
+                        console.error(`LLM summarization error for message ${messageId}:`, llmError.message);
+                        processingStatus = "summarization_failed";
+                        llmErrorMessage = llmError.message; // Store the error message
+                    }
+                } else {
+                    console.warn(`No body found for message ${messageId}, skipping summarization.`);
+                    processingStatus = "no_body_for_summary";
+                }
+
+                let finalProcessingStatus = processingStatus;
+                const autoSendIsEnabled = userDoc.autoSendEnabled === true;
+
+                if (autoSendIsEnabled && summaryText && processingStatus === "summarized") {
+                    // TODO: Implement actual email sending via Gmail API using userAccessToken. This will require constructing a MIME message and using the gmail.users.messages.send API. Ensure 'gmail.send' scope is granted by users.
+                    console.info(`[USER: ${userId}, MSG: ${messageId}] Auto-send enabled. Placeholder: Email to ${emailDetails.from} with subject "Re: ${emailDetails.subject}" would be sent here. Full send logic pending.`);
+                    finalProcessingStatus = "summarized_auto_send_pending"; 
+
+                    // TODO: Implement audit log entry creation in 'outboundAudits' Firestore collection after successful auto-send. Include details like userId, originalMessageId, sentMessageId (from Gmail API response), recipient, subject, and timestamp.
+                    console.info(`[USER: ${userId}, MSG: ${messageId}] Placeholder: Audit log entry for auto-send to ${emailDetails.from} for original message ${messageId} would be created here. Full audit logic pending.`);
+                }
+
+                const processedEmailRef = firestore.collection('processedEmails').doc(messageId); 
+                const dataToStore = {
+                    userId: userId, 
+                    messageId: messageId, 
+                    threadId: emailDetails.rawPayload ? emailDetails.rawPayload.threadId : null,
+                    subject: emailDetails.subject,
+                    from: emailDetails.from,
+                    date: emailDetails.date, 
+                    snippet: emailDetails.snippet,
+                    plainBody: emailDetails.body, 
+                    summary: summaryText, 
+                    processedAt: FieldValue.serverTimestamp(), 
+                    status: finalProcessingStatus, // Use the potentially modified status
+                };
+                if (llmErrorMessage) { 
+                    dataToStore.errorMessage = llmErrorMessage;
+                } else if (finalProcessingStatus.includes("failed") && !llmErrorMessage) { // Ensure not to overwrite specific LLM error
+                    dataToStore.errorMessage = `Processing failed with status: ${finalProcessingStatus}`; 
+                }
+                
+                await processedEmailRef.set(dataToStore);
+                console.log(`Successfully stored/updated processed email ${messageId} with status '${finalProcessingStatus}' to Firestore.`);
+                
+                // successCount should reflect successful summarization, even if auto-send is just pending
+                if (processingStatus === "summarized" || finalProcessingStatus === "summarized_auto_send_pending") {
+                     successCount++;
+                } else {
+                     failureCount++; 
+                }
+
+            } catch (error) { 
+                console.error(`Unhandled error processing message ${messageId} for user ${userId}:`, error.message, error.stack);
+                failureCount++;
+                try {
+                    await firestore.collection('processedEmails').doc(messageId).set({
+                        userId: userId,
+                        messageId: messageId,
+                        status: 'processing_failed_uncaught',
+                        errorMessage: error.message,
+                        processedAt: FieldValue.serverTimestamp()
+                    }, { merge: true });
+                } catch (fsError) {
+                    console.error(`Failed to even write error status for message ${messageId} to Firestore:`, fsError.message);
+                }
+            }
         }
-      } catch (llmError) {
-        console.error(`LLM summarization error for message ${firstNewMessageId}:`, llmError.message);
-        processingStatus = "summarization_failed";
-        // Optionally store llmError.message in Firestore as well
-      }
+        console.log(`Finished processing batch for user ${userId}. Total messages: ${newMessages.length}, Successfully summarized: ${successCount}, Failed/Skipped: ${failureCount}.`);
     } else {
-      console.warn(`No body found or emailDetails missing for message ${firstNewMessageId}, skipping summarization.`);
-      processingStatus = "no_body_for_summary";
-    }
-
-    // **NEW: Store in Firestore**
-    const processedEmailRef = firestore.collection('processedEmails').doc(emailDetails.id);
-    const dataToStore = {
-      userId: userId, // Google User ID (sub)
-      messageId: emailDetails.id,
-      threadId: emailDetails.rawPayload ? emailDetails.rawPayload.threadId : null,
-      subject: emailDetails.subject,
-      from: emailDetails.from,
-      date: emailDetails.date, // Consider converting to Firestore Timestamp if not already
-      snippet: emailDetails.snippet,
-      plainBody: emailDetails.body, // Storing the fetched body (might be truncated if we did that before prompt)
-      summary: summaryText, // This will be null if summarization failed or was skipped
-      processedAt: FieldValue.serverTimestamp(), // Use FieldValue
-      status: processingStatus,
-      // rawHeaders: emailDetails.rawPayload.headers, // Optional: for detailed debugging/future use
-    };
-
-    try {
-      await processedEmailRef.set(dataToStore);
-      console.log(`Successfully stored processed email ${emailDetails.id} with status '${processingStatus}' to Firestore.`);
-    } catch (firestoreError) {
-      console.error(`Error storing processed email ${emailDetails.id} to Firestore:`, firestoreError);
-      // Decide on further error handling if Firestore write fails (e.g., retry, dead-letter queue)
+        console.log(`No new INBOX messages found for user ${userId} since startHistoryId ${startHistoryId}.`);
     }
 
   } catch (error) {

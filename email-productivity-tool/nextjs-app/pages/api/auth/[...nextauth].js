@@ -79,7 +79,14 @@ export const authOptions = {
       authorization: { 
         params: {
           prompt: "consent", access_type: "offline", response_type: "code",
-          scope: "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify"
+          scope: "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send"
+          // Scopes explanation:
+          // - userinfo.profile: Basic profile information (name, picture).
+          // - userinfo.email: User's email address.
+          // - gmail.readonly: Read Gmail messages (for processing, summarization).
+          // - gmail.modify: Modify Gmail messages (e.g., mark as read - though not currently used, was for future flexibility).
+          // - gmail.send: Send email on behalf of the user (for auto-send replies feature). 
+          //   IMPORTANT: Adding/changing this scope requires admin action in GCP OAuth consent screen and user re-authentication.
         }
       }
     }),
