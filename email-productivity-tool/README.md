@@ -177,4 +177,165 @@ Retrieves a paginated and filterable list of reply feedback entries.
 (Content unchanged)
 
 This README provides a starting point for setting up and running the MVP.
+
+## MVP Deployment and Testing Guide
+
+This guide outlines the critical steps to deploy, configure, and test the MVP version of the Email Productivity Tool.
+
+### Phase 1: Deployment & Critical Configuration
+
+**A. Deploy the Next.js Application**
+
+1.  **Choose Hosting Platform:** Recommended: Vercel, Netlify, AWS Amplify, Google Cloud Run. Follow platform-specific instructions for deploying a Next.js app (usually via Git repository connection).
+2.  **Set Environment Variables (Next.js App):** During deployment setup, configure the following:
+    *   `GOOGLE_CLIENT_ID`: Your Google OAuth Client ID.
+    *   `GOOGLE_CLIENT_SECRET`: Your Google OAuth Client Secret.
+    *   `NEXTAUTH_SECRET`: A strong random string for NextAuth.js.
+    *   `NEXTAUTH_URL`: The canonical URL of your deployed Next.js app (e.g., `https://your-app.vercel.app`).
+    *   `TOKEN_ENCRYPTION_KEY`: A strong, random secret key (e.g., 32 or 64 chars) for encrypting OAuth tokens. **Must be identical to the key used in the Cloud Function.**
+    *   `FIREBASE_PROJECT_ID`: Your Firebase project ID.
+    *   `FIREBASE_CLIENT_EMAIL`: Client email from Firebase Admin SDK service account JSON.
+    *   `FIREBASE_PRIVATE_KEY`: Private key from Firebase Admin SDK service account JSON (ensure correct formatting, e.g., replace literal `\n` with newlines if required by your platform).
+    *   `DEEPSEEK_API_KEY`: API key for the DeepSeek LLM (or your chosen LLM).
+    *   `GCP_PROJECT_ID_FOR_PUBSUB`: Your Google Cloud Project ID (for Pub/Sub).
+    *   `PUBSUB_TOPIC_NAME_FOR_GMAIL`: Name of your Pub/Sub topic for Gmail notifications.
+3.  **Build & Deploy:** Let the platform build and deploy your app.
+4.  **Obtain Deployed URL:** Note the public URL of your deployed Next.js app. This is needed for other configurations.
+
+**B. Google Cloud Function Deployment (`handleGmailNotification`)**
+
+1.  **Navigate to Google Cloud Console:** Go to your GCP Project -> Cloud Functions.
+2.  **Create/Update Cloud Function:**
+    *   **Name:** e.g., `handleGmailNotification`.
+    *   **Region:** Choose your preferred region.
+    *   **Trigger:** "Cloud Pub/Sub." Select the Pub/Sub topic created for Gmail notifications.
+    *   **Source Code:** Upload or link the contents of `email-productivity-tool/gcp-functions/handleGmailNotification/`. Ensure `package.json`, `index.js`, `cfGmailUtils.js`, `cfCryptoUtils.js` are included.
+    *   **Runtime:** Node.js (e.g., Node.js 20 or 18).
+    *   **Entry point:** `handleGmailNotification`.
+3.  **Set Environment Variables (Cloud Function):** Under "Runtime, build and connections settings" -> "Runtime" -> "Runtime environment variables":
+    *   `TOKEN_ENCRYPTION_KEY`: **Exact same key** as used in the Next.js app.
+    *   `FIREBASE_PROJECT_ID`: Your Firebase project ID.
+    *   `FIREBASE_CLIENT_EMAIL`: Firebase Admin SDK client email.
+    *   `FIREBASE_PRIVATE_KEY`: Firebase Admin SDK private key (formatted correctly).
+    *   `DEEPSEEK_API_KEY`: LLM API key.
+4.  **Service Account Permissions:** Ensure the Cloud Function's runtime service account has permissions for Pub/Sub (subscriber), Firestore (read/write), and any other GCP services it might interact with. (Gmail API calls are made using user tokens, not the function's service account identity directly for Gmail).
+5.  **Deploy.**
+
+**C. Google Apps Script Add-on Deployment**
+
+1.  **Open/Create Apps Script Project:** Associated with your add-on.
+2.  **Copy Files:**
+    *   Populate `appsscript.json` with the content from `email-productivity-tool/apps-script-addon/appsscript.json`.
+    *   Populate `Code.gs` with the content from `email-productivity-tool/apps-script-addon/Code.gs`.
+3.  **CRITICAL: Update `NEXTJS_APP_BASE_URL` in `Code.gs`:**
+    *   Change the placeholder `const NEXTJS_APP_BASE_URL = "https://your-nextjs-app-deployment-url.com";` to the **actual deployed URL of your Next.js application** (from Part A, step 4).
+4.  **Set GCP Project:** In Apps Script editor -> Project Settings (gear icon) -> "Google Cloud Platform (GCP) Project," associate it with the same GCP Project used for Pub/Sub, Firestore, etc.
+5.  **Deploy:** Click "Deploy" -> "New deployment." Select type "Add-on."
+
+**D. CRITICAL: Update Pub/Sub Topic in Next.js `watch.js` API**
+
+1.  **File:** `email-productivity-tool/nextjs-app/pages/api/gmail/watch.js`
+2.  **Action:** Modify the `pubSubTopicName` variable to use the environment variables set in Part A, step 2:
+    ```javascript
+    const gcpProjectId = process.env.GCP_PROJECT_ID_FOR_PUBSUB;
+    const topicName = process.env.PUBSUB_TOPIC_NAME_FOR_GMAIL;
+    const pubSubTopicName = `projects/${gcpProjectId}/topics/${topicName}`;
+    if (!gcpProjectId || !topicName) {
+      console.error("Critical: GCP_PROJECT_ID_FOR_PUBSUB or PUBSUB_TOPIC_NAME_FOR_GMAIL environment variables not set in Next.js app!");
+      // Potentially return an error response to the client
+    }
+    ```
+3.  **Re-deploy Next.js Application** if you made code changes to `watch.js`.
+
+### Phase 2: Firestore `promptLibrary` Setup
+
+1.  **Navigate to Firestore Database** in your Firebase project console.
+2.  **Create `promptLibrary` Collection** (if it doesn't exist).
+    *   Collection ID: `promptLibrary`
+3.  **Create `defaultReplyPrompt` Document:**
+    *   Document ID: `defaultReplyPrompt`
+    *   Fields:
+        *   `template` (string):
+            ```text
+            You are an AI assistant helping a user draft a reply to an email.
+            The original email was received from: {{originalFrom}}
+            The subject of the original email is: "{{originalSubject}}"
+            The original email was received on: {{originalDate}}
+
+            Original email body:
+            {{originalEmailBody}}
+
+            ---
+            The user has provided the following context or instructions for the reply: "{{userContext}}"
+            ---
+
+            Please draft a {{tone}} reply to the original email based on the user's context.
+            If the original email asks a question, try to answer it.
+            If it's a statement, acknowledge it appropriately.
+            Keep the reply concise and relevant.
+            Do not invent information not present in the original email or user's context.
+            Generate only the body of the reply, without any greetings like "Hi [User's Name]," or sign-offs like "Best regards, [User's Name]", unless the user's context specifically instructs you to add them.
+            ```
+        *   `description` (string, Optional): `Default template for generating email replies.`
+        *   `lastUpdated` (timestamp, Optional): Current timestamp.
+4.  **Create `defaultSummaryPrompt` Document:**
+    *   Document ID: `defaultSummaryPrompt`
+    *   Fields:
+        *   `template` (string):
+            ```text
+            Summarize the following email concisely. Extract key information and main points.
+            Original sender: {{originalFrom}}
+            Original subject: "{{originalSubject}}"
+
+            Email body:
+            {{originalEmailBody}}
+
+            Summary:
+            ```
+        *   `description` (string, Optional): `Default template for generating email summaries.`
+        *   `lastUpdated` (timestamp, Optional): Current timestamp.
+
+### Phase 3: End-to-End Testing Guidance
+
+**Prerequisites:** Test Google account, secondary email account, all components deployed and configured, `promptLibrary` set up.
+
+**Key Flows & Verification Points:**
+
+1.  **User Authentication & Initial Setup (Web App):**
+    *   Flow: Sign in, grant OAuth.
+    *   Verify: Successful login, user doc in Firestore (with encrypted tokens).
+2.  **Gmail Watch Setup (Web App):**
+    *   Flow: Click "Setup Gmail Watch."
+    *   Verify: UI success, `watchExpiration` & `gmailHistoryId` in user's Firestore doc. Next.js server logs for `/api/gmail/watch`.
+3.  **Real-Time Email Ingestion, Processing, Summarization:**
+    *   Flow: Send email to test Gmail account.
+    *   Verify:
+        *   Cloud Function (`handleGmailNotification`) logs: Pub/Sub trigger, user lookup, token decryption, Gmail history call, LLM summarization call (using dynamic prompt), Firestore `processedEmails` write.
+        *   Firestore `processedEmails`: New doc with summary, status `summarized` (if auto-send off).
+        *   Web App: New email & summary appear.
+4.  **On-Demand Summarization (Web App & Add-on):**
+    *   Flow: Use "Re-summarize" (web) or "Summarize Email" (add-on).
+    *   Verify: UI displays summary. Next.js server logs for `/api/ai/summarize` (check for dynamic prompt usage).
+5.  **On-Demand Reply Generation & Review (Web App & Add-on):**
+    *   Flow: Generate reply (web/add-on), provide context/tone.
+    *   Verify: UI displays draft. Next.js server logs for `/api/ai/generate-reply` (check dynamic prompt).
+    *   Add-on: "Insert into Reply Composer" works.
+    *   Web App: "Send via Gmail" works (email sent, appears in "Sent," correct threading). Next.js server logs for `/api/gmail/send`.
+6.  **Feedback Submission (Web App):**
+    *   Flow: Submit thumbs up/down for summaries & replies.
+    *   Verify: UI confirmation. Firestore `summaryFeedback` & `replyFeedback` collections updated. Next.js server logs for feedback APIs.
+7.  **Auto-Send Functionality:**
+    *   Flow: Enable "Auto Send" in web app settings. Send new email to test account.
+    *   Verify:
+        *   Cloud Function logs: `autoSendEnabled: true`, LLM reply generation, MIME construction, Gmail API send call.
+        *   Firestore `processedEmails` status `auto_sent`.
+        *   Gmail "Sent" folder: Auto-reply present. Recipient receives it (check threading).
+        *   Firestore `outboundAudits`: New audit log entry.
+8.  **Dynamic Prompts Test:**
+    *   Flow: Modify `template` in `promptLibrary` docs. Trigger new summary/reply.
+    *   Verify: AI output reflects template changes.
+9.  **Error Handling Tests (Examples):**
+    *   Revoke app's Google OAuth access, then try using app/add-on.
+    *   Temporarily use an invalid LLM API key.
+    *   Try actions with invalid inputs (e.g., fake message ID).
 ```
